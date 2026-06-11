@@ -5,6 +5,7 @@
 
 import express from 'express';
 import path from 'path';
+import os from 'os';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { 
@@ -14,17 +15,21 @@ import {
 } from './src/types';
 
 const app = express();
-const PORT = 3000;
-const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
+const DATA_DIR = isVercel ? path.join(os.tmpdir(), 'knpss_data') : path.join(process.cwd(), 'data');
+const UPLOADS_DIR = isVercel ? path.join(os.tmpdir(), 'uploads') : path.join(process.cwd(), 'uploads');
+const DB_FILE = path.join(DATA_DIR, 'db.json');
+const SEED_DB_FILE = path.join(process.cwd(), 'data', 'db.json');
 
 // Ensure data folder exists
-if (!fs.existsSync(path.join(process.cwd(), 'data'))) {
-  fs.mkdirSync(path.join(process.cwd(), 'data'));
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
 // Ensure uploads folder exists
-if (!fs.existsSync(path.join(process.cwd(), 'uploads'))) {
-  fs.mkdirSync(path.join(process.cwd(), 'uploads'), { recursive: true });
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 // Global In-Memory Store synced with DB_FILE
@@ -662,6 +667,14 @@ function loadFromDisk() {
       db = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
     } catch (e) {
       console.error("Failed to parse db.json, generating seeds...", e);
+      seedDatabase();
+    }
+  } else if (fs.existsSync(SEED_DB_FILE)) {
+    try {
+      fs.copyFileSync(SEED_DB_FILE, DB_FILE);
+      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+    } catch (e) {
+      console.error("Failed to copy seed db.json into writable data directory:", e);
       seedDatabase();
     }
   } else {
@@ -2129,4 +2142,8 @@ async function startServer() {
   });
 }
 
-startServer();
+export { app };
+
+if (!isVercel) {
+  startServer();
+}
