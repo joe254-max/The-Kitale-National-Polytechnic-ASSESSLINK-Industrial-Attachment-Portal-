@@ -287,7 +287,8 @@ export default function App() {
 
   // Forgot Password states
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
-  const [forgotPasswordStep, setForgotPasswordStep] = useState<'email' | 'otp' | 'reset'>('email');
+  const [forgotPasswordStep, setForgotPasswordStep] = useState<'email' | 'otp' | 'reset' | 'supabase'>('email');
+  const [forgotPasswordMode, setForgotPasswordMode] = useState<'otp' | 'supabase'>('otp');
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
   const [forgotPasswordOtp, setForgotPasswordOtp] = useState('');
   const [forgotPasswordNewPassword, setForgotPasswordNewPassword] = useState('');
@@ -901,6 +902,7 @@ export default function App() {
   const handleForgotPasswordSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setForgotPasswordError('');
+    setForgotPasswordSuccess('');
     setForgotPasswordLoading(true);
 
     if (!forgotPasswordEmail.trim()) {
@@ -910,15 +912,23 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/v1/auth/send-otp', {
+      const res = await fetch('/api/v1/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotPasswordEmail })
       });
 
       if (res.ok) {
-        setForgotPasswordSuccess('OTP sent to your email! Check your inbox.');
-        setForgotPasswordStep('otp');
+        const data = await res.json();
+        if (data.mode === 'supabase-reset') {
+          setForgotPasswordMode('supabase');
+          setForgotPasswordStep('supabase');
+          setForgotPasswordSuccess('Password reset email sent via Supabase. Check your inbox.');
+        } else {
+          setForgotPasswordMode('otp');
+          setForgotPasswordStep('otp');
+          setForgotPasswordSuccess('OTP sent to your email! Check your inbox.');
+        }
         setTimeout(() => setForgotPasswordSuccess(''), 3000);
       } else {
         const errObj = await res.json();
@@ -1025,6 +1035,7 @@ export default function App() {
   const closeForgotPassword = () => {
     setIsForgotPasswordOpen(false);
     setForgotPasswordStep('email');
+    setForgotPasswordMode('otp');
     setForgotPasswordEmail('');
     setForgotPasswordOtp('');
     setForgotPasswordNewPassword('');
@@ -2308,11 +2319,13 @@ export default function App() {
                       {forgotPasswordStep === 'email' && 'Recover Password'}
                       {forgotPasswordStep === 'otp' && 'Verify Code'}
                       {forgotPasswordStep === 'reset' && 'Set New Password'}
+                      {forgotPasswordStep === 'supabase' && 'Reset Password Email Sent'}
                     </h3>
                     <p className="text-gray-500 text-sm mt-1">
                       {forgotPasswordStep === 'email' && 'Enter your email to receive a verification code'}
                       {forgotPasswordStep === 'otp' && 'Enter the 6-digit code sent to your email'}
                       {forgotPasswordStep === 'reset' && 'Create a strong new password'}
+                      {forgotPasswordStep === 'supabase' && 'A password reset email has been sent. Open your inbox and follow the link to reset your password.'}
                     </p>
                   </div>
 
@@ -2384,6 +2397,22 @@ export default function App() {
                         {forgotPasswordLoading ? 'VERIFYING...' : 'VERIFY CODE'}
                       </button>
                     </form>
+                  )}
+
+                  {forgotPasswordStep === 'supabase' && (
+                    <div className="space-y-4">
+                      <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
+                        <p className="text-sm text-blue-900">A reset email has been sent to <span className="font-semibold">{forgotPasswordEmail}</span>.</p>
+                        <p className="text-xs text-blue-700 mt-2">Follow the link in your inbox to reset your password. If you don&apos;t see it, check spam or promotions.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closeForgotPassword}
+                        className="w-full h-[45px] bg-[#6B1020] hover:bg-[#8C1D2F] text-white font-bold text-xs uppercase tracking-[0.15em] rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        CLOSE
+                      </button>
+                    </div>
                   )}
 
                   {/* Step 3: Reset Password */}

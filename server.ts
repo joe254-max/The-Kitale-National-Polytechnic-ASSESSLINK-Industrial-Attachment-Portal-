@@ -11,6 +11,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { Resend } from 'resend';
+import { createClient } from '@supabase/supabase-js';
 
 // Load environment variables
 const envResult = dotenv.config({ path: path.join(process.cwd(), '.env.local') });
@@ -35,6 +36,15 @@ const SEED_DB_FILE = path.join(process.cwd(), 'data', 'db.json');
 // Initialize Resend client
 const resend = new Resend(process.env.RESEND_API_KEY);
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_RESET_PASSWORD_REDIRECT_URL = process.env.SUPABASE_RESET_PASSWORD_REDIRECT_URL || process.env.APP_URL || 'http://localhost:4173';
+
+const supabase = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    })
+  : null;
 
 // OTP Store: Map of email -> { code, expiresAt }
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
@@ -1056,25 +1066,50 @@ app.post('/api/v1/auth/verify-otp', (req, res) => {
 });
 
 app.post('/api/v1/auth/forgot-password', async (req, res) => {
-  const { email } = req.body;
-  const user = db.users.find(u => u.email.toLowerCase() === email?.toLowerCase());
-  if (!user) {
-    return res.status(404).json({ title: "Not Found", detail: "Email not discovered" });
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ title: "Bad Request", detail: "Email is required" });
+    }
+
+    const emailLower = email.toLowerCase();
+    const user = db.users.find(u => u.email.toLowerCase() === emailLower);
+    if (!user) {
+      return res.status(404).json({ title: "Not Found", detail: "Email not discovered" });
+    }
+
+    if (supabase) {
+      const { data, error } = await supabase.auth.resetPasswordForEmail(emailLower, {
+        redirectTo: SUPABASE_RESET_PASSWORD_REDIRECT_URL
+      });
+
+      if (error) {
+        console.error('Supabase forgot-password error:', error);
+        return res.status(500).json({ title: 'Email Error', detail: 'Failed to send Supabase password reset email.' });
+      }
+
+      logAudit(user.id, "PASSWORD_RESET_EMAIL_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
+      return res.json({
+        message: "Password reset email sent via Supabase. Check your inbox.",
+        mode: "supabase-reset",
+        email: emailLower
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+    otpStore.set(emailLower, { code: otp, expiresAt });
+
+    if (user.phone) {
+      await sendSMS(user.phone, `Your KNPSS Link password reset code is ${otp}. Expires in 10 minutes. Do not share.`);
+    }
+
+    logAudit(user.id, "PASSWORD_RESET_OTP_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
+    res.json({ message: "OTP sent to your email and phone number.", mode: "otp", simulatedOtp: otp });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ title: "Server Error", detail: "Failed to process password reset request" });
   }
-
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  // Store OTP with 10-minute expiry
-  const expiresAt = Date.now() + 10 * 60 * 1000;
-  otpStore.set(email.toLowerCase(), { code: otp, expiresAt });
-  
-  // Simulate dispatching via Email + Africa's Talking
-  if (user.phone) {
-    await sendSMS(user.phone, `Your KNPSS Link password reset code is ${otp}. Expires in 10 minutes. Do not share.`);
-  }
-
-  logAudit(user.id, "PASSWORD_RESET_OTP_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
-
-  res.json({ message: "OTP sent to your email and phone number.", simulatedOtp: otp });
 });
 
 app.post('/api/v1/auth/reset-password', (req, res) => {
