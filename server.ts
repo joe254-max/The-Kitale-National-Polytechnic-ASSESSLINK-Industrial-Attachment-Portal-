@@ -3,21 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import dotenv from 'dotenv';
-import express from 'express';
-import path from 'path';
-import os from 'os';
-import fs from 'fs';
-import crypto from 'crypto';
-import { createServer as createViteServer } from 'vite';
+import * as dotenv from 'dotenv';
+import * as express from 'express';
+import * as crypto from 'crypto';
 import { Resend } from 'resend';
-import { createClient } from '@supabase/supabase-js';
-
-// Load environment variables
-const envResult = dotenv.config({ path: path.join(process.cwd(), '.env.local') });
-if (envResult.error) {
-  console.warn('Warning: .env.local file not loaded:', envResult.error);
-}
+import { supabase } from './lib/supabase';
 
 import { 
   User, TraineeProfile, OfficerProfile, SupervisorProfile, AdminProfile,
@@ -25,728 +15,121 @@ import {
   DownloadEvent, AppNotification, AuditLog, SMSLog, AttendanceRecord
 } from './src/types';
 
-const app = express();
-const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
-const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
-const DATA_DIR = isVercel ? path.join(os.tmpdir(), 'knpss_data') : path.join(process.cwd(), 'data');
-const UPLOADS_DIR = isVercel ? path.join(os.tmpdir(), 'uploads') : path.join(process.cwd(), 'uploads');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-const SEED_DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+dotenv.config({ path: './.env.local' });
 
-// Initialize Resend client
-const resend = new Resend(process.env.RESEND_API_KEY);
+const expressFactory = express as any;
+const app = expressFactory.default ? expressFactory.default() : expressFactory();
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+const resend = new Resend(process.env.RESEND_API_KEY || '');
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_RESET_PASSWORD_REDIRECT_URL = process.env.SUPABASE_RESET_PASSWORD_REDIRECT_URL || process.env.APP_URL || 'http://localhost:4173';
 
-const supabase = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
-  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    })
-  : null;
-
-// OTP Store: Map of email -> { code, expiresAt }
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
-
-// Reset Token Store: Map of resetToken -> { email, expiresAt }
 const resetTokenStore = new Map<string, { email: string; expiresAt: number }>();
 
-// Clean up expired OTPs every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [email, otp] of otpStore.entries()) {
-    if (otp.expiresAt < now) {
-      otpStore.delete(email);
-    }
+function toSnakeCase(value: any): any {
+  if (Array.isArray(value)) return value.map(toSnakeCase);
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return Object.entries(value).reduce((acc, [key, val]) => {
+      const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      acc[snakeKey] = toSnakeCase(val);
+      return acc;
+    }, {} as any);
   }
-  // Clean up expired reset tokens
-  for (const [token, data] of resetTokenStore.entries()) {
-    if (data.expiresAt < now) {
-      resetTokenStore.delete(token);
-    }
-  }
-}, 5 * 60 * 1000);
-
-// Ensure data folder exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  return value;
 }
 
-// Ensure uploads folder exists
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-
-// Global In-Memory Store synced with DB_FILE
-let db = {
-  users: [] as User[],
-  traineeProfiles: [] as TraineeProfile[],
-  officerProfiles: [] as OfficerProfile[],
-  supervisorProfiles: [] as SupervisorProfile[],
-  adminProfiles: [] as AdminProfile[],
-  placements: [] as Placement[],
-  logbookEntries: [] as LogbookEntry[],
-  assessments: [] as Assessment[],
-  documents: [] as InstitutionalDocument[],
-  documentEntitlements: [] as DocumentEntitlement[],
-  downloadEvents: [] as DownloadEvent[],
-  notifications: [] as AppNotification[],
-  auditLogs: [] as AuditLog[],
-  smsLogs: [] as SMSLog[],
-  attendanceRecords: [] as AttendanceRecord[],
-  systemSettings: {
-    institutionName: "Kenya National Polytechnic & Vocational Sciences",
-    attachmentDurationWeeks: 12,
-    lateWindowHours: 48,
-    smsApiKey: "at_key_8f97b001a2f3",
-    smsUsername: "knpss_attachment",
-    smsSenderId: "KNPSS_LINK",
-    feeCollectionEnabled: true,
-    feeAmount: 1500, // KES
-    force2FA: false
+function toCamelCase(value: any): any {
+  if (Array.isArray(value)) return value.map(toCamelCase);
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return Object.entries(value).reduce((acc, [key, val]) => {
+      const camelKey = key.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+      acc[camelKey] = toCamelCase(val);
+      return acc;
+    }, {} as any);
   }
-};
-
-// Seed Helper
-function seedDatabase() {
-  // 1. Seed Users (passwords are stored as hashed values; default seeded password is "password")
-  const users: User[] = [
-    {
-      id: "u-trainee-1",
-      role: "TRAINEE",
-      fullName: "Joseph Kurian",
-      email: "trainee@knpss.ac.ke",
-      passwordHash: hashPassword('password'),
-      phone: "+254712345678",
-      profilePhotoUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80",
-      isActive: true,
-      isApprovedForLogin: true,
-      lastLoginAt: new Date().toISOString(),
-      createdAt: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "u-trainee-2",
-      role: "TRAINEE",
-      fullName: "Mary Wambui",
-      email: "mary.wambui@knpss.ac.ke",
-      passwordHash: hashPassword('password'),
-      phone: "+254722111222",
-      profilePhotoUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120&auto=format&fit=crop&q=80",
-      isActive: true,
-      isApprovedForLogin: true,
-      createdAt: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "u-trainee-3",
-      role: "TRAINEE",
-      fullName: "David Kimani",
-      email: "david.kimani@knpss.ac.ke",
-      passwordHash: hashPassword('password'),
-      phone: "+254733444555",
-      profilePhotoUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=80",
-      isActive: true,
-      isApprovedForLogin: true,
-      createdAt: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "u-trainee-4",
-      role: "TRAINEE",
-      fullName: "Faith Mutua",
-      email: "faith.mutua@knpss.ac.ke",
-      passwordHash: hashPassword('password'),
-      phone: "+254722999000",
-      profilePhotoUrl: "https://images.unsplash.com/photo-1534751516642-a131fed10495?w=120&auto=format&fit=crop&q=80",
-      isActive: true,
-      isApprovedForLogin: true,
-      createdAt: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "u-officer-1",
-      role: "OFFICER",
-      fullName: "Mary Wanjiku",
-      email: "officer@knpss.ac.ke",
-      passwordHash: hashPassword('password'),
-      phone: "+254799000111",
-      profilePhotoUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80",
-      isActive: true,
-      isApprovedForLogin: true,
-      createdAt: new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "u-supervisor-1",
-      role: "SUPERVISOR",
-      fullName: "John Mwangi",
-      email: "supervisor@corporates.com",
-      passwordHash: hashPassword('password'),
-      phone: "+254711223344",
-      profilePhotoUrl: "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=120&auto=format&fit=crop&q=80",
-      isActive: true,
-      isApprovedForLogin: true,
-      createdAt: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "u-admin-1",
-      role: "ADMIN",
-      fullName: "Dr. James Kamau",
-      email: "admin@knpss.ac.ke",
-      phone: "+254700999888",
-      profilePhotoUrl: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=120&auto=format&fit=crop&q=80",
-      isActive: true,
-      isApprovedForLogin: true,
-      createdAt: new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-  ];
-
-  // 2. Trainee Profiles
-  const traineeProfiles: TraineeProfile[] = [
-    {
-      id: "tp-1",
-      userId: "u-trainee-1",
-      admissionNo: "KNPSS/DICT/2022/4102",
-      courseCode: "DICT",
-      courseName: "Diploma in Information Communication Technology",
-      cohort: "2023 Intake",
-      attachmentDurationWeeks: 12,
-      eligibilityStatus: "ELIGIBLE",
-      feePaid: true,
-      createdAt: new Date(Date.now() - 29 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: "tp-2",
-      userId: "u-trainee-2",
-      admissionNo: "KNPSS/DEEE/2022/9104",
-      courseCode: "DEEE",
-      courseName: "Diploma in Electrical & Electronic Engineering",
-      cohort: "2023 Intake",
-      attachmentDurationWeeks: 12,
-      eligibilityStatus: "PENDING",
-      feePaid: false,
-      createdAt: new Date(Date.now() - 29 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: "tp-3",
-      userId: "u-trainee-3",
-      admissionNo: "KNPSS/DME/2022/1049",
-      courseCode: "DME",
-      courseName: "Diploma in Mechanical Engineering",
-      cohort: "2023 Intake",
-      attachmentDurationWeeks: 12,
-      eligibilityStatus: "ELIGIBLE",
-      feePaid: true,
-      createdAt: new Date(Date.now() - 29 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: "tp-4",
-      userId: "u-trainee-4",
-      admissionNo: "KNPSS/DBAT/2022/5021",
-      courseCode: "DBAT",
-      courseName: "Diploma in Building & Civil Technology",
-      cohort: "2023 Intake",
-      attachmentDurationWeeks: 12,
-      eligibilityStatus: "ELIGIBLE",
-      feePaid: true,
-      createdAt: new Date(Date.now() - 29 * 24 * 3600 * 1000).toISOString()
-    }
-  ];
-
-  // 3. Placements
-  const placements: Placement[] = [
-    {
-      id: "pl-1",
-      traineeId: "tp-1",
-      companyName: "Kenya Power and Lighting Company",
-      companyAddress: "Electricity House, Harambee Avenue, Nairobi",
-      supervisorId: "u-supervisor-1",
-      supervisorName: "John Mwangi",
-      supervisorPhone: "+254711223344",
-      supervisorEmail: "supervisor@corporates.com",
-      locationLat: -1.2858,
-      locationLng: 36.8229,
-      county: "Nairobi",
-      startDate: "2026-05-01",
-      endDate: "2026-07-24",
-      status: "ACTIVE",
-      assignedOfficerId: "u-officer-1",
-      acceptanceLetterUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-      iloLetterUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-      createdAt: new Date(Date.now() - 28 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "pl-2",
-      traineeId: "tp-2",
-      companyName: "Athee River Cement Works",
-      companyAddress: "Mombasa Road, Athi River",
-      supervisorName: "Eng. Robert Nandi",
-      supervisorPhone: "+254722556677",
-      supervisorEmail: "nandi@athicement.co.ke",
-      locationLat: -1.4518,
-      locationLng: 36.9620,
-      county: "Machakos",
-      startDate: "2026-06-10",
-      endDate: "2026-08-30",
-      status: "PLACED",
-      assignedOfficerId: "u-officer-1",
-      createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "pl-3",
-      traineeId: "tp-3",
-      companyName: "Kenya Ports Authority",
-      companyAddress: "Kilindini Harbour, Mombasa",
-      supervisorName: "Capt. Abdi Juma",
-      supervisorPhone: "+254733123456",
-      supervisorEmail: "juma@kpa.co.ke",
-      locationLat: -4.0435,
-      locationLng: 39.6682,
-      county: "Mombasa",
-      startDate: "2026-05-15",
-      endDate: "2026-08-15",
-      status: "ACTIVE",
-      assignedOfficerId: "u-officer-1",
-      createdAt: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "pl-4",
-      traineeId: "tp-4",
-      companyName: "KenGen Kisumu Power Station",
-      companyAddress: "Kenyagen Sector, Kisumu",
-      supervisorName: "Sarah Koech",
-      supervisorPhone: "+254712456789",
-      supervisorEmail: "koech@kengen.co.ke",
-      locationLat: -0.0917,
-      locationLng: 34.7680,
-      county: "Kisumu",
-      startDate: "2026-03-01",
-      endDate: "2026-05-24",
-      status: "COMPLETED",
-      assignedOfficerId: "u-officer-1",
-      createdAt: new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-  ];
-
-  // 4. Logbook Entries
-  const logbookEntries: LogbookEntry[] = [
-    {
-      id: "le-1",
-      placementId: "pl-1",
-      entryDate: "2026-05-04",
-      weekNumber: 1,
-      activitiesDescription: "Attended safety induction training. Introduced to the power grid configuration and control center protocols. Reviewed schematic symbols for circuit breakers and transformers.",
-      skillsAcquired: "Understanding grid system safety guidelines and interpreting high-voltage equipment schematics.",
-      toolsUsed: "KPLC Grid Safety Manual, Schematic Draw tools",
-      supervisorName: "John Mwangi",
-      fileUrls: ["https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80"],
-      fileHashes: ["d8a43f9a74bf1"],
-      status: "APPROVED",
-      version: 1,
-      isLate: false,
-      officerComments: "Excellent summary. Clear understanding of safety principles shown.",
-      rubricScores: {
-        "Attendance": 5,
-        "Quality of Report": 4,
-        "Technical Skills": 4,
-        "Use of Tools": 4,
-        "Safety Compliance": 5,
-        "Professional Conduct": 5,
-        "Learning Progress": 4
-      },
-      reviewedAt: new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString(),
-      reviewedBy: "u-officer-1",
-      supervisorAcknowledged: true,
-      supervisorComment: "Quick learner, followed all safety commands during orientation.",
-      supervisorAcknowledgedAt: new Date(Date.now() - 21 * 24 * 3600 * 1000).toISOString(),
-      createdAt: new Date("2026-05-04T17:00:00Z").toISOString(),
-      updatedAt: new Date("2026-05-04T18:30:00Z").toISOString()
-    },
-    {
-      id: "le-2",
-      placementId: "pl-1",
-      entryDate: "2026-05-05",
-      weekNumber: 1,
-      activitiesDescription: "Participated in maintenance of an 11KV outdoor transformer terminal. Cleaned insulator bushings, tightened bolted busbar clamps, and verified grease level of isolator levers.",
-      skillsAcquired: "Insulator bushing sanitization and thermal-lever joint compression techniques.",
-      toolsUsed: "Insulator cleaner, ratchet wrench, contact resistance meter",
-      supervisorName: "John Mwangi",
-      fileUrls: ["https://images.unsplash.com/photo-1581092335397-9583fe92d232?w=600&auto=format&fit=crop&q=80"],
-      fileHashes: ["c2b45f9c44ab2"],
-      status: "APPROVED",
-      version: 1,
-      isLate: false,
-      officerComments: "Good hand-on experience log. Very specific on tasks.",
-      rubricScores: {
-        "Attendance": 5,
-        "Quality of Report": 5,
-        "Technical Skills": 4,
-        "Use of Tools": 4,
-        "Safety Compliance": 5,
-        "Professional Conduct": 4,
-        "Learning Progress": 5
-      },
-      reviewedAt: new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString(),
-      reviewedBy: "u-officer-1",
-      supervisorAcknowledged: true,
-      supervisorComment: "Successfully assisted team. Highly observant.",
-      supervisorAcknowledgedAt: new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString(),
-      createdAt: new Date("2026-05-05T17:15:00Z").toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "le-3",
-      placementId: "pl-1",
-      entryDate: "2026-06-01",
-      weekNumber: 5,
-      activitiesDescription: "Configured local area network nodes at KPLC offices. Interfaced edge switches, terminated Category 6 solid cables utilizing impact-punch blocks, and certified pin assignment continuity.",
-      skillsAcquired: "Structured copper cabling, punch-termination, Ethernet diagnostics.",
-      toolsUsed: "Fluke cable analyzer, impact punch-down tool, modular crimper",
-      supervisorName: "John Mwangi",
-      fileUrls: [],
-      fileHashes: [],
-      status: "SUBMITTED",
-      version: 1,
-      isLate: false,
-      supervisorAcknowledged: false,
-      createdAt: new Date("2026-06-01T16:45:00Z").toISOString(),
-      updatedAt: new Date().toISOString()
-    },
-    {
-      id: "le-4",
-      placementId: "pl-1",
-      entryDate: "2026-06-02",
-      weekNumber: 5,
-      activitiesDescription: "Troubleshooted optical fiber patch panel in the server room. Located a macro-bend in single-mode fiber patch cord using visual fault locator (VFL), replaced cord, and audited light attenuation loss.",
-      skillsAcquired: "OTDR / VFL trace verification and signal budget auditing.",
-      toolsUsed: "Visual Fault Locator, Fiber cleaner pen",
-      supervisorName: "John Mwangi",
-      fileUrls: [],
-      fileHashes: [],
-      status: "CORRECTION_REQUESTED",
-      version: 1,
-      isLate: false,
-      supervisorAcknowledged: false,
-      officerComments: "Please describe what attenuation reading you achieved after replacing the fiber patch cord so we can assess practical learning.",
-      createdAt: new Date("2026-06-02T17:10:00Z").toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-  ];
-
-  // 5. Assessments
-  const assessments: Assessment[] = [];
-
-  // 6. Documents
-  const documents: InstitutionalDocument[] = [
-    {
-      id: "doc-1",
-      title: "KNPSS Attachment Insurance Form (All Trainees)",
-      category: "INSURANCE",
-      version: "v4.2",
-      fileUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-      fileHash: "859f7dc2a92e10a24",
-      visibility: "ALL",
-      downloadPolicy: "SINGLE",
-      downloadLimit: 1,
-      isActive: true,
-      uploadedBy: "u-admin-1",
-      createdAt: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString(),
-      validationCode: "SAFE-KNP-2026"
-    },
-    {
-      id: "doc-2",
-      title: "NITA Attachment Reimbursement Claim Form",
-      category: "NITA",
-      version: "v2.1",
-      fileUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-      fileHash: "92ba98bc72a1e",
-      visibility: "ALL",
-      downloadPolicy: "N_DOWNLOADS",
-      downloadLimit: 3,
-      isActive: true,
-      uploadedBy: "u-admin-1",
-      createdAt: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: "doc-3",
-      title: "Industrial Attachment Handbook and Code of Conduct",
-      category: "POLICY",
-      version: "v5.0",
-      fileUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-      fileHash: "a1a2b3c4d5e6",
-      visibility: "ALL",
-      downloadPolicy: "UNLIMITED",
-      isActive: true,
-      uploadedBy: "u-admin-1",
-      createdAt: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: "doc-4",
-      title: "Liaison Office Introduction Letter (Restricted)",
-      category: "LETTER",
-      version: "v1.0",
-      fileUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-      fileHash: "f1e2d3c4b5a6",
-      visibility: "PROGRAM",
-      visibilityFilter: "DICT",
-      downloadPolicy: "VIEW_ONLY",
-      isActive: true,
-      uploadedBy: "u-admin-1",
-      createdAt: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString()
-    }
-  ];
-
-  // 7. Entitlements
-  const documentEntitlements: DocumentEntitlement[] = [
-    {
-      id: "ent-1",
-      documentId: "doc-1",
-      userId: "u-trainee-1",
-      downloadsUsed: 0
-    },
-    {
-      id: "ent-2",
-      documentId: "doc-2",
-      userId: "u-trainee-1",
-      downloadsUsed: 1
-    }
-  ];
-
-  // 8. Notifications
-  const notifications: AppNotification[] = [
-    {
-      id: "not-1",
-      userId: "u-trainee-1",
-      type: "LOGBOOK_STATUS",
-      title: "Entry Correction Requested",
-      body: "Weekly entry for 2026-06-02 requires correction. Officer comments: 'Please describe attenuation reading...'",
-      isRead: false,
-      relatedEntityType: "LOGBOOK_ENTRY",
-      relatedEntityId: "le-4",
-      createdAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString()
-    },
-    {
-      id: "not-2",
-      userId: "u-trainee-1",
-      type: "DOCUMENT",
-      title: "New Attachment Policy Document Uploaded",
-      body: "Dr. James Kamau uploaded 'KNPSS Attachment Insurance Form'",
-      isRead: true,
-      relatedEntityType: "DOCUMENT",
-      relatedEntityId: "doc-1",
-      createdAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString()
-    }
-  ];
-
-  // 9. Audit Logs
-  const auditLogs: AuditLog[] = [
-    {
-      id: "al-1",
-      userId: "u-admin-1",
-      action: "USER_IMPORT",
-      entityType: "USER",
-      entityId: "u-trainee-1",
-      metadata: "Seeded trainee Joseph Kurian to DICT cohort",
-      ipAddress: "127.0.0.1",
-      createdAt: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
-    }
-  ];
-
-  const smsLogs: SMSLog[] = [];
-  
-  const attendanceRecords: AttendanceRecord[] = [
-    {
-      id: "att-1",
-      placementId: "pl-1",
-      traineeId: "tp-1",
-      date: "2026-06-01",
-      dayOfWeek: "Monday",
-      status: "Present",
-      markedBy: "John Mwangi",
-      createdAt: new Date("2026-06-01T16:00:00Z").toISOString(),
-      updatedAt: new Date("2026-06-01T16:00:00Z").toISOString()
-    },
-    {
-      id: "att-2",
-      placementId: "pl-1",
-      traineeId: "tp-1",
-      date: "2026-06-02",
-      dayOfWeek: "Tuesday",
-      status: "Present",
-      markedBy: "John Mwangi",
-      createdAt: new Date("2026-06-02T16:00:00Z").toISOString(),
-      updatedAt: new Date("2026-06-02T16:00:00Z").toISOString()
-    },
-    {
-      id: "att-3",
-      placementId: "pl-1",
-      traineeId: "tp-1",
-      date: "2026-06-03",
-      dayOfWeek: "Wednesday",
-      status: "Present",
-      markedBy: "John Mwangi",
-      createdAt: new Date("2026-06-03T16:00:00Z").toISOString(),
-      updatedAt: new Date("2026-06-03T16:00:00Z").toISOString()
-    },
-    {
-      id: "att-4",
-      placementId: "pl-1",
-      traineeId: "tp-1",
-      date: "2026-06-04",
-      dayOfWeek: "Thursday",
-      status: "Half-Day",
-      markedBy: "John Mwangi",
-      createdAt: new Date("2026-06-04T16:00:00Z").toISOString(),
-      updatedAt: new Date("2026-06-04T16:00:00Z").toISOString()
-    },
-    {
-      id: "att-5",
-      placementId: "pl-1",
-      traineeId: "tp-1",
-      date: "2026-06-05",
-      dayOfWeek: "Friday",
-      status: "Present",
-      markedBy: "John Mwangi",
-      createdAt: new Date("2026-06-05T16:00:00Z").toISOString(),
-      updatedAt: new Date("2026-06-05T16:00:00Z").toISOString()
-    },
-    {
-      id: "att-6",
-      placementId: "pl-1",
-      traineeId: "tp-1",
-      date: "2026-06-08",
-      dayOfWeek: "Monday",
-      status: "Present",
-      markedBy: "John Mwangi",
-      createdAt: new Date("2026-06-08T16:00:00Z").toISOString(),
-      updatedAt: new Date("2026-06-08T16:00:00Z").toISOString()
-    },
-    {
-      id: "att-7",
-      placementId: "pl-1",
-      traineeId: "tp-1",
-      date: "2026-06-09",
-      dayOfWeek: "Tuesday",
-      status: "Present",
-      markedBy: "John Mwangi",
-      createdAt: new Date("2026-06-09T10:00:00Z").toISOString(),
-      updatedAt: new Date("2026-06-09T10:00:00Z").toISOString()
-    }
-  ];
-
-  const officerProfiles: OfficerProfile[] = [
-    {
-      id: "op-1",
-      userId: "u-officer-1",
-      employeeNo: "KNPSS-ASSESSOR-04",
-      department: "School of Engineering & Mechanical Arts",
-      specialization: "On-Site Compliance & Practical Logbook Audit",
-      assignedRegions: ["Nairobi Area", "Kiambu County"],
-      completedAssessmentsCount: 14,
-      officeRoom: "Liaison Wing B, Room 14",
-      availabilityStatus: "AVAILABLE",
-      createdAt: new Date().toISOString()
-    }
-  ];
-
-  const supervisorProfiles: SupervisorProfile[] = [
-    {
-      id: "sp-1",
-      userId: "u-supervisor-1",
-      companyName: "Kenya Power and Lighting Company",
-      jobTitle: "Senior Electrical Engineering Superintendent",
-      department: "Substations & Distribution Systems",
-      workEmail: "jmwangi@kplc.co.ke",
-      workPhone: "+254711223344",
-      officeLocation: "Stima Plaza, Block C, 4th Floor",
-      maxTraineesCapacity: 5,
-      currentAssignedTraineesCount: 1,
-      createdAt: new Date().toISOString()
-    }
-  ];
-
-  const adminProfiles: AdminProfile[] = [
-    {
-      id: "ap-1",
-      userId: "u-admin-1",
-      adminStaffCode: "KNPSS-ILO-ADMIN-01",
-      portfolio: "Director of Industrial Liaison & Placement Services",
-      permissionsRole: "SYSTEM_ADMIN",
-      officeExtension: "EXT-8012",
-      deskLocation: "Administration Block A, Suite 10",
-      createdAt: new Date().toISOString()
-    }
-  ];
-
-  db = {
-    users,
-    traineeProfiles,
-    officerProfiles,
-    supervisorProfiles,
-    adminProfiles,
-    placements,
-    logbookEntries,
-    assessments,
-    documents,
-    documentEntitlements,
-    downloadEvents: [],
-    notifications,
-    auditLogs,
-    smsLogs,
-    attendanceRecords,
-    systemSettings: db.systemSettings
-  };
-
-  saveToDisk();
+  return value;
 }
 
-// Save & Load DB to JSON
-function saveToDisk() {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+async function fetchOne(table: string, filters: Record<string, any>) {
+  let query = supabase.from(table).select('*');
+  for (const [column, value] of Object.entries(filters)) {
+    if (column === 'email' && typeof value === 'string') {
+      query = query.ilike(column, value.toLowerCase());
+    } else {
+      query = query.eq(column, value);
+    }
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return toCamelCase(data);
+}
+
+async function fetchAll(table: string, queryBuilder?: (builder: any) => any) {
+  let query = supabase.from(table).select('*');
+  if (queryBuilder) query = queryBuilder(query);
+  const { data, error } = await query;
+  if (error) throw error;
+  return toCamelCase(data || []);
+}
+
+async function fetchAllWhere(table: string, filters: Record<string, any>) {
+  let query = supabase.from(table).select('*');
+  for (const [column, value] of Object.entries(filters)) {
+    query = query.eq(column, value);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return toCamelCase(data || []);
+}
+
+async function insertRow(table: string, row: any) {
+  const { data, error } = await supabase.from(table).insert(toSnakeCase(row)).select();
+  if (error) throw error;
+  return toCamelCase(data?.[0]);
+}
+
+async function insertRows(table: string, rows: any[]) {
+  const { data, error } = await supabase.from(table).insert(rows.map(toSnakeCase)).select();
+  if (error) throw error;
+  return toCamelCase(data || []);
+}
+
+async function updateRow(table: string, updates: any, filters: Record<string, any>) {
+  let query = supabase.from(table).update(toSnakeCase(updates)).select();
+  for (const [column, value] of Object.entries(filters)) {
+    query = query.eq(column, value);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return toCamelCase(data);
+}
+
+async function getSystemSettings() {
+  const { data, error } = await supabase.from('settings').select('*').eq('id', 'default').maybeSingle();
+  if (error || !data) {
+    console.error('Failed to fetch system settings:', error);
+    return {
+      institutionName: 'Kenya National Polytechnic & Vocational Sciences',
+      attachmentDurationWeeks: 12,
+      lateWindowHours: 48,
+      smsApiKey: 'at_key_8f97b001a2f3',
+      smsUsername: 'knpss_attachment',
+      smsSenderId: 'KNPSS_LINK',
+      feeCollectionEnabled: true,
+      feeAmount: 1500,
+      force2FA: false
+    };
+  }
+  return toCamelCase(data);
 }
 
 function hashPassword(password: string) {
   return crypto.createHash('sha256').update(String(password)).digest('hex');
 }
 
-function loadFromDisk() {
-  if (fs.existsSync(DB_FILE)) {
-    try {
-      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-    } catch (e) {
-      console.error("Failed to parse db.json, generating seeds...", e);
-      seedDatabase();
-    }
-  } else if (fs.existsSync(SEED_DB_FILE)) {
-    try {
-      fs.copyFileSync(SEED_DB_FILE, DB_FILE);
-      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-    } catch (e) {
-      console.error("Failed to copy seed db.json into writable data directory:", e);
-      seedDatabase();
-    }
-  } else {
-    seedDatabase();
-  }
-}
-
-// Initial Load
-loadFromDisk();
-
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Helper to write to Audit Trail
-function logAudit(userId: string | undefined, action: string, type?: string, id?: string, oldVals?: any, newVals?: any, ip: string = "127.0.0.1") {
-  const log: AuditLog = {
+async function logAudit(userId: string | undefined, action: string, type?: string, id?: string, oldVals?: any, newVals?: any, ip: string = '127.0.0.1') {
+  await insertRow('audit_logs', {
     id: `al-${Math.random().toString(36).substr(2, 9)}`,
     userId,
     action,
@@ -756,14 +139,11 @@ function logAudit(userId: string | undefined, action: string, type?: string, id?
     newValues: newVals ? JSON.stringify(newVals) : undefined,
     ipAddress: ip,
     createdAt: new Date().toISOString()
-  };
-  db.auditLogs.unshift(log); // newest first
-  saveToDisk();
+  });
 }
 
-// Helper to push in-app Notifications
-function makeNotification(userId: string, type: string, title: string, body: string, entType?: string, entId?: string) {
-  const notification: AppNotification = {
+async function makeNotification(userId: string, type: string, title: string, body: string, entType?: string, entId?: string) {
+  await insertRow('app_notifications', {
     id: `not-${Math.random().toString(36).substr(2, 9)}`,
     userId,
     type,
@@ -773,295 +153,266 @@ function makeNotification(userId: string, type: string, title: string, body: str
     relatedEntityType: entType,
     relatedEntityId: entId,
     createdAt: new Date().toISOString()
-  };
-  db.notifications.unshift(notification);
-  saveToDisk();
+  });
 }
 
-// Helper to trigger SMS simulations
 async function sendSMS(phoneNumber: string, message: string) {
-  const log: SMSLog = {
+  const settings = await getSystemSettings();
+  await insertRow('sms_logs', {
     id: `sms-${Math.random().toString(36).substr(2, 9)}`,
     phoneNumber,
     message,
-    senderId: db.systemSettings.smsSenderId,
-    status: "SENT",
+    senderId: settings.smsSenderId,
+    status: 'SENT',
     createdAt: new Date().toISOString()
-  };
-  db.smsLogs.unshift(log);
-  saveToDisk();
-  console.log(`[SMS SIMULATION] To: ${phoneNumber} | From: ${db.systemSettings.smsSenderId} | Content: "${message}"`);
+  });
+  console.log(`[SMS SIMULATION] To: ${phoneNumber} | From: ${settings.smsSenderId} | Content: "${message}"`);
 }
 
-
-// --- API ROUTES ---
-
-// 9.1 Authentication Endpoints
-app.post('/api/v1/auth/login', (req, res) => {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({
-      type: "about:blank",
-      title: "Bad Request",
-      status: 400,
-      detail: "Email and password are required"
-    });
-  }
-
-  const user = db.users.find(u => u.email.toLowerCase() === String(email).toLowerCase());
-  if (!user) {
-    return res.status(401).json({
-      type: "about:blank",
-      title: "Unauthorized",
-      status: 401,
-      detail: "Invalid login credentials"
-    });
-  }
-
-  const hashedPassword = hashPassword(String(password));
-  if (!user.passwordHash || user.passwordHash !== hashedPassword) {
-    return res.status(401).json({
-      type: "about:blank",
-      title: "Unauthorized",
-      status: 401,
-      detail: "Invalid login credentials"
-    });
-  }
-
-  if (!user.isActive) {
-    return res.status(410).json({
-      type: "about:blank",
-      title: "Unauthorized",
-      status: 410,
-      detail: "This account has been deactivated"
-    });
-  }
-
-  if (user.role === 'TRAINEE' && user.isApprovedForLogin === false) {
-    return res.status(403).json({
-      type: "about:blank",
-      title: "Approval Pending",
-      status: 403,
-      detail: "Your account is in the Trainees Directory, but your permanent active login is locked. Please request Admin approval."
-    });
-  }
-
-  user.lastLoginAt = new Date().toISOString();
-  saveToDisk();
-
-  logAudit(user.id, "USER_LOGIN", "USER", user.id, undefined, undefined, req.ip);
-
-  res.json({
-    accessToken: `at_jwt_${user.id}_${Math.random().toString(36).substr(2, 9)}`,
-    user: {
-      id: user.id,
-      role: user.role,
-      fullName: user.fullName,
-      email: user.email,
-      phone: user.phone,
-      isApprovedForLogin: user.isApprovedForLogin,
-      profilePhotoUrl: user.profilePhotoUrl
-    }
-  });
-});
-
-
-app.post('/api/v1/auth/signup', (req, res) => {
-  const { fullName, email, phone, role, password, confirmPassword } = req.body;
-
-  if (!fullName || !email || !phone || !password || !confirmPassword) {
-    return res.status(400).json({
-      title: "Bad Request",
-      detail: "Full Name, Email, Phone, and Password are required fields"
-    });
-  }
-
-  if (String(password).length < 8) {
-    return res.status(400).json({
-      title: "Bad Request",
-      detail: "Password must be at least 8 characters long"
-    });
-  }
-
-  if (password !== confirmPassword) {
-    return res.status(400).json({
-      title: "Bad Request",
-      detail: "Password and confirmation do not match"
-    });
-  }
-
-  const existingUser = db.users.find(u => u.email.toLowerCase() === String(email).toLowerCase());
-  if (existingUser) {
-    return res.status(400).json({
-      title: "Bad Request",
-      detail: "An account with this email address already exists"
-    });
-  }
-
-  const userRole = role || 'TRAINEE';
-  
-  const newUser: User = {
-    id: `u-${Math.random().toString(36).substr(2, 9)}`,
-    role: userRole,
-    fullName,
-    email: String(email).toLowerCase(),
-    passwordHash: hashPassword(String(password)),
-    phone: phone || '',
-    profilePhotoUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80",
-    isActive: true,
-    isApprovedForLogin: true,
-    lastLoginAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+async function ensureOfficerProfile(userId: string) {
+  const existing = await fetchOne('officer_profiles', { user_id: userId });
+  if (existing) return existing;
+  const profile: OfficerProfile = {
+    id: `op-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    employeeNo: `KNPSS-ASSESSOR-0${Math.floor(1 + Math.random() * 9)}`,
+    department: 'School of Engineering & Technical Arts',
+    specialization: 'On-Site Compliance & Practical Logbook Audit',
+    assignedRegions: ['Nairobi Area', 'Kiambu County'],
+    completedAssessmentsCount: 14,
+    officeRoom: 'Liaison Wing B, Room 14',
+    availabilityStatus: 'AVAILABLE',
+    createdAt: new Date().toISOString()
   };
+  return insertRow('officer_profiles', profile);
+}
 
-  db.users.push(newUser);
+async function ensureSupervisorProfile(userId: string) {
+  const existing = await fetchOne('supervisor_profiles', { user_id: userId });
+  if (existing) return existing;
+  const profile: SupervisorProfile = {
+    id: `sp-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    companyName: 'Kenya Power and Lighting Company',
+    jobTitle: 'Senior Electrical Engineering Superintendent',
+    department: 'Substations & Distribution Systems',
+    workEmail: 'supervisor@corporates.com',
+    workPhone: '+254711223344',
+    officeLocation: 'Stima Plaza, Block C, 4th Floor',
+    maxTraineesCapacity: 5,
+    currentAssignedTraineesCount: 1,
+    createdAt: new Date().toISOString()
+  };
+  return insertRow('supervisor_profiles', profile);
+}
 
-  // If trainee, also create trainee profile
-  if (userRole === 'TRAINEE') {
-    const admissionNo = `KNPSS/ADMIT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
-    const tp: TraineeProfile = {
-      id: `tp-${Math.random().toString(36).substr(2, 9)}`,
-      userId: newUser.id,
-      admissionNo,
-      courseCode: "DICT",
-      courseName: "Diploma in Information Communication Technology",
-      cohort: "2024 Intake",
-      attachmentDurationWeeks: db.systemSettings.attachmentDurationWeeks,
-      eligibilityStatus: "PENDING",
-      feePaid: false,
-      createdAt: new Date().toISOString()
-    };
-    db.traineeProfiles.push(tp);
-  }
+async function ensureAdminProfile(userId: string) {
+  const existing = await fetchOne('admin_profiles', { user_id: userId });
+  if (existing) return existing;
+  const profile: AdminProfile = {
+    id: `ap-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    adminStaffCode: 'KNPSS-ILO-ADMIN-01',
+    portfolio: 'Director of Industrial Liaison & Placement Services',
+    permissionsRole: 'SYSTEM_ADMIN',
+    officeExtension: 'EXT-8012',
+    deskLocation: 'Administration Block A, Suite 10',
+    createdAt: new Date().toISOString()
+  };
+  return insertRow('admin_profiles', profile);
+}
 
-  logAudit(newUser.id, "USER_SIGNUP", "USER", newUser.id, undefined, newUser, req.ip);
-  saveToDisk();
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  res.json({
-    accessToken: `at_jwt_${newUser.id}_${Math.random().toString(36).substr(2, 9)}`,
-    user: {
-      id: newUser.id,
-      role: newUser.role,
-      fullName: newUser.fullName,
-      email: newUser.email,
-      phone: newUser.phone,
-      isApprovedForLogin: newUser.isApprovedForLogin,
-      profilePhotoUrl: newUser.profilePhotoUrl
+app.post('/api/v1/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ type: 'about:blank', title: 'Bad Request', status: 400, detail: 'Email and password are required' });
     }
-  });
+
+    const emailLower = String(email).toLowerCase();
+    const user = await fetchOne('users', { email: emailLower });
+    if (!user) {
+      return res.status(401).json({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Invalid login credentials' });
+    }
+
+    const hashedPassword = hashPassword(String(password));
+    if (!user.passwordHash || user.passwordHash !== hashedPassword) {
+      return res.status(401).json({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Invalid login credentials' });
+    }
+
+    if (!user.isActive) {
+      return res.status(410).json({ type: 'about:blank', title: 'Unauthorized', status: 410, detail: 'This account has been deactivated' });
+    }
+
+    if (user.role === 'TRAINEE' && user.isApprovedForLogin === false) {
+      return res.status(403).json({ type: 'about:blank', title: 'Approval Pending', status: 403, detail: 'Your account is in the Trainees Directory, but your permanent active login is locked. Please request Admin approval.' });
+    }
+
+    await updateRow('users', { lastLoginAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { id: user.id });
+    await logAudit(user.id, 'USER_LOGIN', 'USER', user.id, undefined, undefined, req.ip);
+
+    res.json({
+      accessToken: `at_jwt_${user.id}_${Math.random().toString(36).substr(2, 9)}`,
+      user: {
+        id: user.id,
+        role: user.role,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        isApprovedForLogin: user.isApprovedForLogin,
+        profilePhotoUrl: user.profilePhotoUrl
+      }
+    });
+  } catch (error: any) {
+    console.error('Login error:', error);
+    res.status(500).json({ type: 'about:blank', title: 'Server Error', status: 500, detail: 'Failed to log in' });
+  }
 });
 
+app.post('/api/v1/auth/signup', async (req, res) => {
+  try {
+    const { fullName, email, phone, role, password, confirmPassword } = req.body;
+    if (!fullName || !email || !phone || !password || !confirmPassword) {
+      return res.status(400).json({ title: 'Bad Request', detail: 'Full Name, Email, Phone, and Password are required fields' });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ title: 'Bad Request', detail: 'Password must be at least 8 characters long' });
+    }
+    if (password !== confirmPassword) {
+      return res.status(400).json({ title: 'Bad Request', detail: 'Password and confirmation do not match' });
+    }
+
+    const emailLower = String(email).toLowerCase();
+    const existingUser = await fetchOne('users', { email: emailLower });
+    if (existingUser) {
+      return res.status(400).json({ title: 'Bad Request', detail: 'An account with this email address already exists' });
+    }
+
+    const userRole = role || 'TRAINEE';
+    const newUser: User = {
+      id: `u-${Math.random().toString(36).substr(2, 9)}`,
+      role: userRole,
+      fullName,
+      email: emailLower,
+      passwordHash: hashPassword(String(password)),
+      phone: phone || '',
+      profilePhotoUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
+      isActive: true,
+      isApprovedForLogin: true,
+      lastLoginAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await insertRow('users', newUser);
+
+    if (userRole === 'TRAINEE') {
+      const admissionNo = `KNPSS/ADMIT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+      const tp: TraineeProfile = {
+        id: `tp-${Math.random().toString(36).substr(2, 9)}`,
+        userId: newUser.id,
+        admissionNo,
+        courseCode: 'DICT',
+        courseName: 'Diploma in Information Communication Technology',
+        cohort: '2024 Intake',
+        attachmentDurationWeeks: (await getSystemSettings()).attachmentDurationWeeks,
+        eligibilityStatus: 'PENDING',
+        feePaid: false,
+        createdAt: new Date().toISOString()
+      };
+      await insertRow('trainee_profiles', tp);
+    }
+
+    await logAudit(newUser.id, 'USER_SIGNUP', 'USER', newUser.id, undefined, newUser, req.ip);
+
+    res.json({
+      accessToken: `at_jwt_${newUser.id}_${Math.random().toString(36).substr(2, 9)}`,
+      user: {
+        id: newUser.id,
+        role: newUser.role,
+        fullName: newUser.fullName,
+        email: newUser.email,
+        phone: newUser.phone,
+        isApprovedForLogin: newUser.isApprovedForLogin,
+        profilePhotoUrl: newUser.profilePhotoUrl
+      }
+    });
+  } catch (error: any) {
+    console.error('Signup error:', error);
+    res.status(500).json({ title: 'Server Error', detail: 'Failed to sign up' });
+  }
+});
 
 app.post('/api/v1/auth/refresh', (req, res) => {
-  // Silent refresh
   res.json({ accessToken: `at_jwt_refresh_${Date.now()}` });
 });
 
 app.delete('/api/v1/auth/logout', (req, res) => {
-  res.status(200).send("OK");
+  res.status(200).send('OK');
 });
 
 app.post('/api/v1/auth/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
-    
     if (!email) {
-      return res.status(400).json({ title: "Bad Request", detail: "Email is required" });
+      return res.status(400).json({ title: 'Bad Request', detail: 'Email is required' });
     }
-
-    const emailLower = email.toLowerCase();
-    
-    // Generate 6-digit OTP
+    const emailLower = String(email).toLowerCase();
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Store OTP with 10-minute expiry
     const expiresAt = Date.now() + 10 * 60 * 1000;
     otpStore.set(emailLower, { code: otp, expiresAt });
-    
-    // Send via Resend
-    if (process.env.RESEND_API_KEY) {
-      try {
-        const resendResult = await resend.emails.send({
-          from: RESEND_FROM_EMAIL,
-          to: emailLower,
-          subject: 'KNPSS AssessLink - Email Verification Code',
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2>Email Verification</h2>
-              <p>Your verification code is:</p>
-              <div style="background: #f0f0f0; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
-                <h1 style="letter-spacing: 5px; color: #333; margin: 0;">${otp}</h1>
-              </div>
-              <p>This code expires in 10 minutes. Do not share this code with anyone.</p>
-              <p style="color: #999; font-size: 12px;">If you did not request this code, please ignore this email.</p>
-            </div>
-          `
-        });
-        console.log('Resend send-otp result:', resendResult);
-      } catch (emailError) {
-        console.error('Resend send-otp error:', emailError);
-        return res.status(500).json({ title: 'Email Error', detail: 'Failed to send OTP email. Please check your Resend settings.' });
-      }
-    } else {
+
+    if (!process.env.RESEND_API_KEY) {
       return res.status(500).json({ title: 'Email Config Error', detail: 'RESEND_API_KEY not configured.' });
     }
-    
-    res.json({ 
-      message: "OTP sent to your email.",
-      email: emailLower,
-      expiresIn: 600, // seconds
-      otp: otp // included for dev debugging
-    });
-  } catch (error) {
+
+    try {
+      await resend.emails.send({
+        from: RESEND_FROM_EMAIL,
+        to: emailLower,
+        subject: 'KNPSS AssessLink - Email Verification Code',
+        html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;"><h2>Email Verification</h2><p>Your verification code is:</p><div style="background: #f0f0f0; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;"><h1 style="letter-spacing: 5px; color: #333; margin: 0;">${otp}</h1></div><p>This code expires in 10 minutes. Do not share this code with anyone.</p><p style="color: #999; font-size: 12px;">If you did not request this code, please ignore this email.</p></div>`
+      });
+    } catch (emailError) {
+      console.error('Resend send-otp error:', emailError);
+      return res.status(500).json({ title: 'Email Error', detail: 'Failed to send OTP email. Please check your Resend settings.' });
+    }
+
+    res.json({ message: 'OTP sent to your email.', email: emailLower, expiresIn: 600, otp });
+  } catch (error: any) {
     console.error('Send OTP error:', error);
-    res.status(500).json({ title: "Server Error", detail: "Failed to send OTP" });
+    res.status(500).json({ title: 'Server Error', detail: 'Failed to send OTP' });
   }
 });
 
-app.post('/api/v1/auth/verify-otp', (req, res) => {
+app.post('/api/v1/auth/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
-    
     if (!email || !otp) {
-      return res.status(400).json({ title: "Bad Request", detail: "Email and OTP are required" });
+      return res.status(400).json({ title: 'Bad Request', detail: 'Email and OTP are required' });
     }
-
-    const emailLower = email.toLowerCase();
+    const emailLower = String(email).toLowerCase();
     const storedOtp = otpStore.get(emailLower);
-    
     if (!storedOtp) {
-      return res.status(400).json({ title: "Invalid", detail: "OTP not found. Please request a new one." });
+      return res.status(400).json({ title: 'Invalid', detail: 'OTP not found. Please request a new one.' });
     }
-    
-    // Check expiration
     if (storedOtp.expiresAt < Date.now()) {
       otpStore.delete(emailLower);
-      return res.status(400).json({ title: "Expired", detail: "OTP has expired. Please request a new one." });
+      return res.status(400).json({ title: 'Expired', detail: 'OTP has expired. Please request a new one.' });
     }
-    
-    // Check code
     if (storedOtp.code !== otp.toString()) {
-      return res.status(400).json({ title: "Invalid", detail: "Incorrect OTP. Please try again." });
+      return res.status(400).json({ title: 'Invalid', detail: 'Incorrect OTP. Please try again.' });
     }
-    
-    // Valid OTP - remove it from store
     otpStore.delete(emailLower);
-    
-    // Generate reset token with 30-minute expiry
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenExpiresAt = Date.now() + 30 * 60 * 1000;
     resetTokenStore.set(resetToken, { email: emailLower, expiresAt: resetTokenExpiresAt });
-    
-    res.json({ 
-      message: "OTP verified successfully",
-      resetToken: resetToken,
-      email: emailLower
-    });
-  } catch (error) {
+    res.json({ message: 'OTP verified successfully', resetToken, email: emailLower });
+  } catch (error: any) {
     console.error('Verify OTP error:', error);
-    res.status(500).json({ title: "Server Error", detail: "Failed to verify OTP" });
+    res.status(500).json({ title: 'Server Error', detail: 'Failed to verify OTP' });
   }
 });
 
@@ -1069,1285 +420,1214 @@ app.post('/api/v1/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) {
-      return res.status(400).json({ title: "Bad Request", detail: "Email is required" });
+      return res.status(400).json({ title: 'Bad Request', detail: 'Email is required' });
     }
-
-    const emailLower = email.toLowerCase();
-    const user = db.users.find(u => u.email.toLowerCase() === emailLower);
+    const emailLower = String(email).toLowerCase();
+    const user = await fetchOne('users', { email: emailLower });
     if (!user) {
-      return res.status(404).json({ title: "Not Found", detail: "Email not discovered" });
-    }
-
-    if (supabase) {
-      const { data, error } = await supabase.auth.resetPasswordForEmail(emailLower, {
-        redirectTo: SUPABASE_RESET_PASSWORD_REDIRECT_URL
-      });
-
-      if (error) {
-        console.error('Supabase forgot-password error:', error);
-        return res.status(500).json({ title: 'Email Error', detail: 'Failed to send Supabase password reset email.' });
-      }
-
-      logAudit(user.id, "PASSWORD_RESET_EMAIL_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
-      return res.json({
-        message: "Password reset email sent via Supabase. Check your inbox.",
-        mode: "supabase-reset",
-        email: emailLower
-      });
+      return res.status(404).json({ title: 'Not Found', detail: 'Email not discovered' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000;
     otpStore.set(emailLower, { code: otp, expiresAt });
 
+    if (process.env.RESEND_API_KEY) {
+      try {
+        await resend.emails.send({
+          from: RESEND_FROM_EMAIL,
+          to: emailLower,
+          subject: 'KNPSS AssessLink - Password Reset Code',
+          html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;"><h2>Password Reset</h2><p>Your password reset code is:</p><div style="background: #f0f0f0; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;"><h1 style="letter-spacing: 5px; color: #333; margin: 0;">${otp}</h1></div><p>This code expires in 10 minutes. Do not share this code with anyone.</p><p style="color: #999; font-size: 12px;">If you did not request this code, please ignore this email.</p></div>`
+        });
+      } catch (emailError) {
+        console.error('Forgot-password email error:', emailError);
+        return res.status(500).json({ title: 'Email Error', detail: 'Failed to send password reset email.' });
+      }
+    }
+
     if (user.phone) {
       await sendSMS(user.phone, `Your KNPSS Link password reset code is ${otp}. Expires in 10 minutes. Do not share.`);
     }
 
-    logAudit(user.id, "PASSWORD_RESET_OTP_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
-    res.json({ message: "OTP sent to your email and phone number.", mode: "otp", simulatedOtp: otp });
-  } catch (error) {
+    await logAudit(user.id, 'PASSWORD_RESET_OTP_TRIGGERED', 'USER', user.id, undefined, undefined, req.ip);
+    res.json({ message: 'OTP sent to your email and phone number.', mode: 'otp', simulatedOtp: otp });
+  } catch (error: any) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ title: "Server Error", detail: "Failed to process password reset request" });
+    res.status(500).json({ title: 'Server Error', detail: 'Failed to process password reset request' });
   }
 });
 
-app.post('/api/v1/auth/reset-password', (req, res) => {
+app.post('/api/v1/auth/reset-password', async (req, res) => {
   try {
     const { resetToken, newPassword } = req.body;
-    
     if (!resetToken || !newPassword) {
-      return res.status(400).json({ title: "Bad Request", detail: "Reset token and new password are required" });
+      return res.status(400).json({ title: 'Bad Request', detail: 'Reset token and new password are required' });
     }
-    
-    // Verify reset token
     const tokenData = resetTokenStore.get(resetToken);
     if (!tokenData) {
-      return res.status(400).json({ title: "Invalid", detail: "Reset token not found. Please request a new one." });
+      return res.status(400).json({ title: 'Invalid', detail: 'Reset token not found. Please request a new one.' });
     }
-    
-    // Check token expiration
     if (tokenData.expiresAt < Date.now()) {
       resetTokenStore.delete(resetToken);
-      return res.status(400).json({ title: "Expired", detail: "Reset token has expired. Please request a new one." });
+      return res.status(400).json({ title: 'Expired', detail: 'Reset token has expired. Please request a new one.' });
     }
-    
-    // Find user and update password
-    const user = db.users.find(u => u.email.toLowerCase() === tokenData.email.toLowerCase());
+    const user = await fetchOne('users', { email: tokenData.email.toLowerCase() });
     if (!user) {
-      return res.status(404).json({ title: "Not Found", detail: "User not found" });
+      return res.status(404).json({ title: 'Not Found', detail: 'User not found' });
     }
-    
-    // Update password
-    user.passwordHash = hashPassword(newPassword);
-    user.updatedAt = new Date().toISOString();
-    
-    // Clean up reset token
+    await updateRow('users', { passwordHash: hashPassword(newPassword), updatedAt: new Date().toISOString() }, { id: user.id });
     resetTokenStore.delete(resetToken);
-    
-    // Save to disk and audit log
-    saveToDisk();
-    logAudit(user.id, "PASSWORD_RESET_COMPLETED", "USER", user.id, undefined, undefined, req.ip);
-    
-    res.json({ status: "success", message: "Password reset successfully. You can now login with your new password." });
-  } catch (error) {
+    await logAudit(user.id, 'PASSWORD_RESET_COMPLETED', 'USER', user.id, undefined, undefined, req.ip);
+    res.json({ status: 'success', message: 'Password reset successfully. You can now login with your new password.' });
+  } catch (error: any) {
     console.error('Reset password error:', error);
-    res.status(500).json({ title: "Server Error", detail: "Failed to reset password" });
+    res.status(500).json({ title: 'Server Error', detail: 'Failed to reset password' });
   }
 });
 
-
-// 9.2 Users Endpoints
-app.get('/api/v1/users', (req, res) => {
-  const stitchedUsers = db.users.map(u => {
-    if (u.role === 'TRAINEE') {
-      const tp = db.traineeProfiles.find(t => t.userId === u.id);
-      return {
-        ...u,
-        admissionNo: tp?.admissionNo || 'Pending Allocation',
-        eligibilityStatus: tp?.eligibilityStatus || 'PENDING'
-      };
-    }
-    return u;
-  });
-  res.json(stitchedUsers);
+app.get('/api/v1/users', async (req, res) => {
+  try {
+    const users = await fetchAll('users');
+    const traineeProfiles = await fetchAll('trainee_profiles');
+    const response = users.map((u: User) => {
+      if (u.role === 'TRAINEE') {
+        const tp = traineeProfiles.find((t: TraineeProfile) => t.userId === u.id);
+        return {
+          ...u,
+          admissionNo: tp?.admissionNo || 'Pending Allocation',
+          eligibilityStatus: tp?.eligibilityStatus || 'PENDING'
+        };
+      }
+      return u;
+    });
+    res.json(response);
+  } catch (error: any) {
+    console.error('Get users error:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
 });
 
-app.post('/api/v1/users/:id/approve-login', (req, res) => {
-  const u = db.users.find(user => user.id === req.params.id);
-  if (!u) return res.status(404).send("User Not Found");
-  
-  const oldApprovalStatus = u.isApprovedForLogin;
-  u.isApprovedForLogin = req.body.isApprovedForLogin !== undefined ? req.body.isApprovedForLogin : true;
-  u.updatedAt = new Date().toISOString();
-  
-  logAudit(undefined, "USER_APPROVAL_OVERRIDE", "USER", u.id, { previousApproved: oldApprovalStatus }, { currentApproved: u.isApprovedForLogin }, req.ip);
-  saveToDisk();
-  res.json({ success: true, user: u });
+app.post('/api/v1/users/:id/approve-login', async (req, res) => {
+  try {
+    const user = await fetchOne('users', { id: req.params.id });
+    if (!user) return res.status(404).send('User Not Found');
+    const updatedUser = await updateRow('users', { isApprovedForLogin: req.body.isApprovedForLogin !== undefined ? req.body.isApprovedForLogin : true, updatedAt: new Date().toISOString() }, { id: req.params.id });
+    await logAudit(undefined, 'USER_APPROVAL_OVERRIDE', 'USER', updatedUser.id, { previousApproved: user.isApprovedForLogin }, { currentApproved: updatedUser.isApprovedForLogin }, req.ip);
+    res.json({ success: true, user: updatedUser });
+  } catch (error: any) {
+    console.error('Approve login error:', error);
+    res.status(500).json({ error: 'Failed to approve login' });
+  }
 });
 
-app.post('/api/v1/users', (req, res) => {
-  const { role, fullName, email, phone, profilePhotoUrl } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
-  const newUser: User = {
-    id: `u-${Math.random().toString(36).substr(2, 9)}`,
-    role,
-    fullName,
-    email,
-    phone,
-    profilePhotoUrl: profilePhotoUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80",
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  db.users.push(newUser);
-
-  // If trainee, also create trainee profile
-  if (role === 'TRAINEE') {
-    const admissionNo = `KNPSS/ADMIT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
-    const tp: TraineeProfile = {
-      id: `tp-${Math.random().toString(36).substr(2, 9)}`,
-      userId: newUser.id,
-      admissionNo,
-      courseCode: "DICT",
-      courseName: "Diploma in Information Communication Technology",
-      cohort: "2024 Intake",
-      attachmentDurationWeeks: db.systemSettings.attachmentDurationWeeks,
-      eligibilityStatus: "PENDING",
-      feePaid: false,
-      createdAt: new Date().toISOString()
+app.post('/api/v1/users', async (req, res) => {
+  try {
+    const { role, fullName, email, phone, profilePhotoUrl } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
+    const newUser: User = {
+      id: `u-${Math.random().toString(36).substr(2, 9)}`,
+      role,
+      fullName,
+      email,
+      phone,
+      profilePhotoUrl: profilePhotoUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
+      isActive: true,
+      isApprovedForLogin: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
-    db.traineeProfiles.push(tp);
-  }
-
-  logAudit(undefined, "USER_CREATION_ADMIN", "USER", newUser.id, undefined, newUser, req.ip);
-  saveToDisk();
-
-  res.status(201).json(newUser);
-});
-
-app.get('/api/v1/users/:id', (req, res) => {
-  const u = db.users.find(user => user.id === req.params.id);
-  if (!u) return res.status(404).send("User Not Found");
-  res.json(u);
-});
-
-app.get('/api/v1/trainee-profile/:userId', (req, res) => {
-  const tp = db.traineeProfiles.find(t => t.userId === req.params.userId);
-  if (!tp) return res.status(404).send("Trainee Profile Not Found");
-  res.json(tp);
-});
-
-app.get('/api/v1/officer-profile/:userId', (req, res) => {
-  if (!db.officerProfiles) db.officerProfiles = [];
-  let op = db.officerProfiles.find(t => t.userId === req.params.userId);
-  if (!op) {
-    op = {
-      id: "op-" + Math.random().toString(36).substring(2, 11),
-      userId: req.params.userId,
-      employeeNo: "KNPSS-ASSESSOR-0" + Math.floor(Math.random() * 9 + 1),
-      department: "School of Engineering & Technical Arts",
-      specialization: "On-Site Compliance & Practical Logbook Audit",
-      assignedRegions: ["Nairobi Area", "Kiambu County"],
-      completedAssessmentsCount: 14,
-      officeRoom: "Liaison Wing B, Room 14",
-      availabilityStatus: "AVAILABLE",
-      createdAt: new Date().toISOString()
-    };
-    db.officerProfiles.push(op);
-    saveToDisk();
-  }
-  res.json(op);
-});
-
-app.patch('/api/v1/officer-profile/:userId', (req, res) => {
-  if (!db.officerProfiles) db.officerProfiles = [];
-  const idx = db.officerProfiles.findIndex(t => t.userId === req.params.userId);
-  if (idx === -1) return res.status(404).send("Officer Profile Not Found");
-  db.officerProfiles[idx] = { ...db.officerProfiles[idx], ...req.body };
-  saveToDisk();
-  res.json(db.officerProfiles[idx]);
-});
-
-app.get('/api/v1/supervisor-profile/:userId', (req, res) => {
-  if (!db.supervisorProfiles) db.supervisorProfiles = [];
-  let sp = db.supervisorProfiles.find(t => t.userId === req.params.userId);
-  if (!sp) {
-    sp = {
-      id: "sp-" + Math.random().toString(36).substring(2, 11),
-      userId: req.params.userId,
-      companyName: "Kenya Power and Lighting Company",
-      jobTitle: "Senior Electrical Engineering Superintendent",
-      department: "Substations & Distribution Systems",
-      workEmail: "supervisor@corporates.com",
-      workPhone: "+254711223344",
-      officeLocation: "Stima Plaza, Block C, 4th Floor",
-      maxTraineesCapacity: 5,
-      currentAssignedTraineesCount: 1,
-      createdAt: new Date().toISOString()
-    };
-    db.supervisorProfiles.push(sp);
-    saveToDisk();
-  }
-  res.json(sp);
-});
-
-app.patch('/api/v1/supervisor-profile/:userId', (req, res) => {
-  if (!db.supervisorProfiles) db.supervisorProfiles = [];
-  const idx = db.supervisorProfiles.findIndex(t => t.userId === req.params.userId);
-  if (idx === -1) return res.status(404).send("Supervisor Profile Not Found");
-  db.supervisorProfiles[idx] = { ...db.supervisorProfiles[idx], ...req.body };
-  saveToDisk();
-  res.json(db.supervisorProfiles[idx]);
-});
-
-app.get('/api/v1/admin-profile/:userId', (req, res) => {
-  if (!db.adminProfiles) db.adminProfiles = [];
-  let ap = db.adminProfiles.find(t => t.userId === req.params.userId);
-  if (!ap) {
-    ap = {
-      id: "ap-" + Math.random().toString(36).substring(2, 11),
-      userId: req.params.userId,
-      adminStaffCode: "KNPSS-ILO-ADMIN-01",
-      portfolio: "Director of Industrial Liaison & Placement Services",
-      permissionsRole: "SYSTEM_ADMIN",
-      officeExtension: "EXT-8012",
-      deskLocation: "Administration Block A, Suite 10",
-      createdAt: new Date().toISOString()
-    };
-    db.adminProfiles.push(ap);
-    saveToDisk();
-  }
-  res.json(ap);
-});
-
-app.patch('/api/v1/admin-profile/:userId', (req, res) => {
-  if (!db.adminProfiles) db.adminProfiles = [];
-  const idx = db.adminProfiles.findIndex(t => t.userId === req.params.userId);
-  if (idx === -1) return res.status(404).send("Admin Profile Not Found");
-  db.adminProfiles[idx] = { ...db.adminProfiles[idx], ...req.body };
-  saveToDisk();
-  res.json(db.adminProfiles[idx]);
-});
-
-app.patch('/api/v1/users/:id', (req, res) => {
-  const uIndex = db.users.findIndex(user => user.id === req.params.id);
-  if (uIndex === -1) return res.status(404).send("User Not Found");
-
-  const old = { ...db.users[uIndex] };
-  db.users[uIndex] = { ...db.users[uIndex], ...req.body, updatedAt: new Date().toISOString() };
-  
-  logAudit(req.params.id, "USER_MODIFICATION", "USER", req.params.id, old, db.users[uIndex], req.ip);
-  saveToDisk();
-  res.json(db.users[uIndex]);
-});
-
-app.delete('/api/v1/users/:id', (req, res) => {
-  // deactivates accounts
-  const u = db.users.find(user => user.id === req.params.id);
-  if (!u) return res.status(404).send("User Not Found");
-  u.isActive = false;
-  u.updatedAt = new Date().toISOString();
-  logAudit(undefined, "USER_DEACTIVATION_ADMIN", "USER", u.id, undefined, u, req.ip);
-  saveToDisk();
-  res.json({ message: "User deactivated successfully.", user: u });
-});
-
-app.post('/api/v1/users/import-csv', (req, res) => {
-  const { csvData } = req.body;
-  // Parse Simulated CSV inputs
-  const lines = csvData.split('\n').filter((l: string) => l.trim().length > 0);
-  const recordsAdded: User[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(',');
-    if (parts.length >= 4) {
-      const fullName = parts[0].trim();
-      const email = parts[1].trim();
-      const phone = parts[2].trim();
-      const adNo = parts[3].trim();
-      
-      const userId = `u-csv-${Math.random().toString(36).substr(2, 9)}`;
-      const newUser: User = {
-        id: userId,
-        role: "TRAINEE",
-        fullName,
-        email,
-        phone,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      db.users.push(newUser);
-
-      const tpId = `tp-csv-${Math.random().toString(36).substr(2, 9)}`;
+    await insertRow('users', newUser);
+    if (role === 'TRAINEE') {
+      const admissionNo = `KNPSS/ADMIT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
       const tp: TraineeProfile = {
-        id: tpId,
+        id: `tp-${Math.random().toString(36).substr(2, 9)}`,
         userId: newUser.id,
-        admissionNo: adNo,
-        courseCode: "DICT",
-        courseName: "Diploma in Information Communication Technology",
-        cohort: "2024 Intake",
-        attachmentDurationWeeks: 12,
-        eligibilityStatus: "ELIGIBLE",
+        admissionNo,
+        courseCode: 'DICT',
+        courseName: 'Diploma in Information Communication Technology',
+        cohort: '2024 Intake',
+        attachmentDurationWeeks: (await getSystemSettings()).attachmentDurationWeeks,
+        eligibilityStatus: 'PENDING',
         feePaid: false,
         createdAt: new Date().toISOString()
       };
-      db.traineeProfiles.push(tp);
-      recordsAdded.push(newUser);
+      await insertRow('trainee_profiles', tp);
     }
+    await logAudit(undefined, 'USER_CREATION_ADMIN', 'USER', newUser.id, undefined, newUser, req.ip);
+    res.status(201).json(newUser);
+  } catch (error: any) {
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Failed to create user' });
   }
-
-  logAudit(undefined, "USER_CSV_IMPORT", "USER", undefined, undefined, { count: recordsAdded.length }, req.ip);
-  saveToDisk();
-
-  res.json({ count: recordsAdded.length, users: recordsAdded });
 });
 
+app.get('/api/v1/users/:id', async (req, res) => {
+  try {
+    const user = await fetchOne('users', { id: req.params.id });
+    if (!user) return res.status(404).send('User Not Found');
+    res.json(user);
+  } catch (error: any) {
+    console.error('Get user error:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
+  }
+});
 
-// 9.3 Placements Endpoints
-app.get('/api/v1/placements', (req, res) => {
-  // Support filtration, or simply returns list
-  const list = db.placements.map(pl => {
-    // Inject Trainee details and Assigned officer details
-    const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-    const userObj = tp ? db.users.find(u => u.id === tp.userId) : null;
-    const officer = pl.assignedOfficerId ? db.users.find(u => u.id === pl.assignedOfficerId) : null;
-    return {
-      ...pl,
-      traineeEnrollment: tp,
-      traineeUser: userObj,
-      assignedOfficer: officer
+app.get('/api/v1/trainee-profile/:userId', async (req, res) => {
+  try {
+    const profile = await fetchOne('trainee_profiles', { user_id: req.params.userId });
+    if (!profile) return res.status(404).send('Trainee Profile Not Found');
+    res.json(profile);
+  } catch (error: any) {
+    console.error('Get trainee profile error:', error);
+    res.status(500).json({ error: 'Failed to fetch trainee profile' });
+  }
+});
+
+app.get('/api/v1/officer-profile/:userId', async (req, res) => {
+  try {
+    const profile = await ensureOfficerProfile(req.params.userId);
+    res.json(profile);
+  } catch (error: any) {
+    console.error('Get officer profile error:', error);
+    res.status(500).json({ error: 'Failed to fetch officer profile' });
+  }
+});
+
+app.patch('/api/v1/officer-profile/:userId', async (req, res) => {
+  try {
+    const profile = await fetchOne('officer_profiles', { user_id: req.params.userId });
+    if (!profile) return res.status(404).send('Officer Profile Not Found');
+    const updated = await updateRow('officer_profiles', req.body, { user_id: req.params.userId });
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Patch officer profile error:', error);
+    res.status(500).json({ error: 'Failed to update officer profile' });
+  }
+});
+
+app.get('/api/v1/supervisor-profile/:userId', async (req, res) => {
+  try {
+    const profile = await ensureSupervisorProfile(req.params.userId);
+    res.json(profile);
+  } catch (error: any) {
+    console.error('Get supervisor profile error:', error);
+    res.status(500).json({ error: 'Failed to fetch supervisor profile' });
+  }
+});
+
+app.patch('/api/v1/supervisor-profile/:userId', async (req, res) => {
+  try {
+    const profile = await fetchOne('supervisor_profiles', { user_id: req.params.userId });
+    if (!profile) return res.status(404).send('Supervisor Profile Not Found');
+    const updated = await updateRow('supervisor_profiles', req.body, { user_id: req.params.userId });
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Patch supervisor profile error:', error);
+    res.status(500).json({ error: 'Failed to update supervisor profile' });
+  }
+});
+
+app.get('/api/v1/admin-profile/:userId', async (req, res) => {
+  try {
+    const profile = await ensureAdminProfile(req.params.userId);
+    res.json(profile);
+  } catch (error: any) {
+    console.error('Get admin profile error:', error);
+    res.status(500).json({ error: 'Failed to fetch admin profile' });
+  }
+});
+
+app.patch('/api/v1/admin-profile/:userId', async (req, res) => {
+  try {
+    const profile = await fetchOne('admin_profiles', { user_id: req.params.userId });
+    if (!profile) return res.status(404).send('Admin Profile Not Found');
+    const updated = await updateRow('admin_profiles', req.body, { user_id: req.params.userId });
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Patch admin profile error:', error);
+    res.status(500).json({ error: 'Failed to update admin profile' });
+  }
+});
+
+app.patch('/api/v1/users/:id', async (req, res) => {
+  try {
+    const user = await fetchOne('users', { id: req.params.id });
+    if (!user) return res.status(404).send('User Not Found');
+    const updated = await updateRow('users', { ...req.body, updatedAt: new Date().toISOString() }, { id: req.params.id });
+    await logAudit(req.params.id, 'USER_MODIFICATION', 'USER', req.params.id, user, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Patch user error:', error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+app.delete('/api/v1/users/:id', async (req, res) => {
+  try {
+    const user = await fetchOne('users', { id: req.params.id });
+    if (!user) return res.status(404).send('User Not Found');
+    const updated = await updateRow('users', { isActive: false, updatedAt: new Date().toISOString() }, { id: req.params.id });
+    await logAudit(undefined, 'USER_DEACTIVATION_ADMIN', 'USER', updated.id, undefined, updated, req.ip);
+    res.json({ message: 'User deactivated successfully.', user: updated });
+  } catch (error: any) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to deactivate user' });
+  }
+});
+
+app.post('/api/v1/users/import-csv', async (req, res) => {
+  try {
+    const { csvData } = req.body;
+    const lines = String(csvData).split('\n').filter((l: string) => l.trim().length > 0);
+    const recordsAdded: User[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(',');
+      if (parts.length >= 4) {
+        const fullName = parts[0].trim();
+        const email = parts[1].trim();
+        const phone = parts[2].trim();
+        const adNo = parts[3].trim();
+        const newUser: User = {
+          id: `u-csv-${Math.random().toString(36).substr(2, 9)}`,
+          role: 'TRAINEE',
+          fullName,
+          email,
+          phone,
+          isActive: true,
+          isApprovedForLogin: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        await insertRow('users', newUser);
+        const tp: TraineeProfile = {
+          id: `tp-csv-${Math.random().toString(36).substr(2, 9)}`,
+          userId: newUser.id,
+          admissionNo: adNo,
+          courseCode: 'DICT',
+          courseName: 'Diploma in Information Communication Technology',
+          cohort: '2024 Intake',
+          attachmentDurationWeeks: 12,
+          eligibilityStatus: 'ELIGIBLE',
+          feePaid: false,
+          createdAt: new Date().toISOString()
+        };
+        await insertRow('trainee_profiles', tp);
+        recordsAdded.push(newUser);
+      }
+    }
+
+    await logAudit(undefined, 'USER_CSV_IMPORT', 'USER', undefined, undefined, { count: recordsAdded.length }, req.ip);
+    res.json({ count: recordsAdded.length, users: recordsAdded });
+  } catch (error: any) {
+    console.error('Import CSV error:', error);
+    res.status(500).json({ error: 'Failed to import CSV users' });
+  }
+});
+
+app.get('/api/v1/placements', async (req, res) => {
+  try {
+    const placements = await fetchAll('placements');
+    const traineeProfiles = await fetchAll('trainee_profiles');
+    const users = await fetchAll('users');
+    const list = placements.map((pl: Placement) => {
+      const tp = traineeProfiles.find((t: TraineeProfile) => t.id === pl.traineeId);
+      const userObj = tp ? users.find((u: User) => u.id === tp.userId) : null;
+      const officer = pl.assignedOfficerId ? users.find((u: User) => u.id === pl.assignedOfficerId) : null;
+      return { ...pl, traineeEnrollment: tp, traineeUser: userObj, assignedOfficer: officer };
+    });
+    res.json(list);
+  } catch (error: any) {
+    console.error('Get placements error:', error);
+    res.status(500).json({ error: 'Failed to fetch placements' });
+  }
+});
+
+app.post('/api/v1/placements', async (req, res) => {
+  try {
+    const { traineeId, companyName, companyAddress, supervisorName, supervisorPhone, supervisorEmail, county, startDate, endDate, acceptanceLetterUrl, locationLat, locationLng } = req.body;
+    const newPl: Placement = {
+      id: `pl-${Math.random().toString(36).substr(2, 9)}`,
+      traineeId,
+      companyName,
+      companyAddress,
+      supervisorName,
+      supervisorPhone,
+      supervisorEmail,
+      county: county || 'Nairobi',
+      locationLat: locationLat !== undefined && locationLat !== null ? parseFloat(locationLat) : undefined,
+      locationLng: locationLng !== undefined && locationLng !== null ? parseFloat(locationLng) : undefined,
+      startDate,
+      endDate,
+      status: 'PLACED',
+      isLocked: req.body.isLocked || false,
+      assignedOfficerId: 'u-officer-1',
+      acceptanceLetterUrl: acceptanceLetterUrl || 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
-  });
-  res.json(list);
-});
-
-app.post('/api/v1/placements', (req, res) => {
-  const { traineeId, companyName, companyAddress, supervisorName, supervisorPhone, supervisorEmail, county, startDate, endDate, acceptanceLetterUrl, locationLat, locationLng } = req.body;
-  
-  const newPl: Placement = {
-    id: `pl-${Math.random().toString(36).substr(2, 9)}`,
-    traineeId,
-    companyName,
-    companyAddress,
-    supervisorName,
-    supervisorPhone,
-    supervisorEmail,
-    county: county || "Nairobi",
-    locationLat: locationLat !== undefined && locationLat !== null ? parseFloat(locationLat) : undefined,
-    locationLng: locationLng !== undefined && locationLng !== null ? parseFloat(locationLng) : undefined,
-    startDate,
-    endDate,
-    status: 'PLACED',
-    isLocked: req.body.isLocked || false,
-    // Assign Mary Wanjiku as the Default Officer easily
-    assignedOfficerId: "u-officer-1",
-    acceptanceLetterUrl: acceptanceLetterUrl || "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  db.placements.push(newPl);
-  logAudit(undefined, "PLACEMENT_CREATION_BY_TRAINEE", "PLACEMENT", newPl.id, undefined, newPl, req.ip);
-  saveToDisk();
-
-  res.status(201).json(newPl);
-});
-
-app.get('/api/v1/placements/:id', (req, res) => {
-  const pl = db.placements.find(p => p.id === req.params.id);
-  if (!pl) return res.status(404).send("Placement Not Found");
-  
-  const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-  const traineeUser = tp ? db.users.find(u => u.id === tp.userId) : null;
-  res.json({
-    ...pl,
-    traineeEnrollment: tp,
-    traineeUser
-  });
-});
-
-app.patch('/api/v1/placements/:id', (req, res) => {
-  const plIndex = db.placements.findIndex(p => p.id === req.params.id);
-  if (plIndex === -1) return res.status(404).send("Placement Not Found");
-
-  const old = { ...db.placements[plIndex] };
-  db.placements[plIndex] = { ...db.placements[plIndex], ...req.body, updatedAt: new Date().toISOString() };
-  
-  logAudit(undefined, "PLACEMENT_MODIFIED", "PLACEMENT", req.params.id, old, db.placements[plIndex], req.ip);
-  saveToDisk();
-  res.json(db.placements[plIndex]);
-});
-
-app.patch('/api/v1/placements/:id/assign-officer', (req, res) => {
-  const { officerId } = req.body;
-  const pl = db.placements.find(p => p.id === req.params.id);
-  if (!pl) return res.status(404).send("Placement Not Found");
-
-  const oldOfficer = pl.assignedOfficerId;
-  pl.assignedOfficerId = officerId;
-  pl.updatedAt = new Date().toISOString();
-
-  logAudit(undefined, "OFFICER_ASSIGNED_TO_PLACEMENT", "PLACEMENT", pl.id, { previousOfficer: oldOfficer }, { currentOfficer: officerId }, req.ip);
-
-  // Notify Trainee
-  const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-  const officerObj = db.users.find(u => u.id === officerId);
-  if (tp && officerObj) {
-    makeNotification(tp.userId, "OFFICER_ASSIGNED", "Attachment Cover Appointed", `Officer ${officerObj.fullName} has been designated for your placement assessments.`, "PLACEMENT", pl.id);
-    if (officerObj.phone) {
-      sendSMS(officerObj.phone, `KNPSS Link: You have been assigned to evaluate trainee ${tp.admissionNo} at ${pl.companyName}.`);
-    }
+    await insertRow('placements', newPl);
+    await logAudit(undefined, 'PLACEMENT_CREATION_BY_TRAINEE', 'PLACEMENT', newPl.id, undefined, newPl, req.ip);
+    res.status(201).json(newPl);
+  } catch (error: any) {
+    console.error('Create placement error:', error);
+    res.status(500).json({ error: 'Failed to create placement' });
   }
-
-  saveToDisk();
-  res.json(pl);
 });
 
-
-// 9.4 Logbook Entries Endpoints
-app.get('/api/v1/logbook/:placementId/entries', (req, res) => {
-  const entries = db.logbookEntries.filter(le => le.placementId === req.params.placementId);
-  res.json(entries.sort((a,b) => b.entryDate.localeCompare(a.entryDate))); // latest date first
-});
-
-app.post('/api/v1/logbook/:placementId/entries', (req, res) => {
-  const { activitiesDescription, skillsAcquired, toolsUsed, entryDate, supervisorName, fileUrls } = req.body;
-  const placementId = req.params.placementId;
-  
-  const pl = db.placements.find(p => p.id === placementId);
-  if (!pl) return res.status(404).send("Placement Not Found");
-
-  // Compute Week Number automatically relative to placement.startDate
-  let weekNumber = 1;
-  if (pl.startDate) {
-    const start = new Date(pl.startDate);
-    const curr = new Date(entryDate);
-    const diffDays = Math.floor((curr.getTime() - start.getTime()) / (24 * 3600 * 1000));
-    weekNumber = Math.max(1, Math.floor(diffDays / 7) + 1);
+app.get('/api/v1/placements/:id', async (req, res) => {
+  try {
+    const pl = await fetchOne('placements', { id: req.params.id });
+    if (!pl) return res.status(404).send('Placement Not Found');
+    const tp = await fetchOne('trainee_profiles', { id: pl.traineeId });
+    const traineeUser = tp ? await fetchOne('users', { id: tp.userId }) : null;
+    res.json({ ...pl, traineeEnrollment: tp, traineeUser });
+  } catch (error: any) {
+    console.error('Get placement error:', error);
+    res.status(500).json({ error: 'Failed to fetch placement' });
   }
+});
 
-  // Late detection (beyond 48h limit)
-  let isLate = false;
-  const created = new Date().getTime();
-  const entDateMid = new Date(entryDate + "T23:59:59").getTime();
-  const lateCutoff = 48 * 3600 * 1000;
-  if (created - entDateMid > lateCutoff) {
-    isLate = true;
+app.patch('/api/v1/placements/:id', async (req, res) => {
+  try {
+    const existing = await fetchOne('placements', { id: req.params.id });
+    if (!existing) return res.status(404).send('Placement Not Found');
+    const updated = await updateRow('placements', { ...req.body, updatedAt: new Date().toISOString() }, { id: req.params.id });
+    await logAudit(undefined, 'PLACEMENT_MODIFIED', 'PLACEMENT', req.params.id, existing, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Patch placement error:', error);
+    res.status(500).json({ error: 'Failed to update placement' });
   }
-
-  // Check unique entry Date version constraints
-  const sameDateEntry = db.logbookEntries.filter(le => le.placementId === placementId && le.entryDate === entryDate);
-  const version = sameDateEntry.length + 1;
-
-  const newEntry: LogbookEntry = {
-    id: `le-${Math.random().toString(36).substr(2, 9)}`,
-    placementId,
-    entryDate,
-    weekNumber,
-    activitiesDescription,
-    skillsAcquired,
-    toolsUsed,
-    supervisorName: supervisorName || pl.supervisorName,
-    fileUrls: fileUrls || [],
-    fileHashes: (fileUrls || []).map(() => Math.random().toString(36).substr(2, 9)),
-    status: 'DRAFT',
-    version,
-    isLate,
-    supervisorAcknowledged: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  db.logbookEntries.push(newEntry);
-  logAudit(undefined, "LOGBOOK_ENTRY_CREATED", "LOGBOOK_ENTRY", newEntry.id, undefined, newEntry, req.ip);
-  saveToDisk();
-
-  res.status(201).json(newEntry);
 });
 
-app.get('/api/v1/logbook/entries/:id', (req, res) => {
-  const le = db.logbookEntries.find(entry => entry.id === req.params.id);
-  if (!le) return res.status(404).send("Entry Not Discovered");
-  res.json(le);
-});
-
-app.patch('/api/v1/logbook/entries/:id', (req, res) => {
-  const entryIdx = db.logbookEntries.findIndex(entry => entry.id === req.params.id);
-  if (entryIdx === -1) return res.status(404).send("Entry Not Found");
-
-  const old = { ...db.logbookEntries[entryIdx] };
-  db.logbookEntries[entryIdx] = { ...db.logbookEntries[entryIdx], ...req.body, updatedAt: new Date().toISOString() };
-  
-  logAudit(undefined, "LOGBOOK_ENTRY_UPDATED", "LOGBOOK_ENTRY", req.params.id, old, db.logbookEntries[entryIdx], req.ip);
-  saveToDisk();
-  res.json(db.logbookEntries[entryIdx]);
-});
-
-app.post('/api/v1/logbook/entries/:id/submit', (req, res) => {
-  const entry = db.logbookEntries.find(le => le.id === req.params.id);
-  if (!entry) return res.status(404).send("Entry Not Found");
-
-  entry.status = "SUBMITTED";
-  entry.updatedAt = new Date().toISOString();
-
-  // Audit
-  logAudit(undefined, "LOGBOOK_ENTRY_SUBMITTED", "LOGBOOK_ENTRY", entry.id, undefined, entry, req.ip);
-  saveToDisk();
-  res.json(entry);
-});
-
-app.post('/api/v1/logbook/entries/:id/approve', (req, res) => {
-  const { rubricScores, comment, evaluatedBy } = req.body;
-  const entry = db.logbookEntries.find(le => le.id === req.params.id);
-  if (!entry) return res.status(404).send("Entry Not Found");
-
-  entry.status = "APPROVED";
-  entry.officerComments = comment;
-  entry.rubricScores = rubricScores;
-  entry.reviewedAt = new Date().toISOString();
-  entry.reviewedBy = evaluatedBy || "u-officer-1";
-  entry.updatedAt = new Date().toISOString();
-
-  // Trigger Notification to Trainee
-  const pl = db.placements.find(p => p.id === entry.placementId);
-  if (pl) {
-    const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-    if (tp) {
-      makeNotification(tp.userId, "LOGBOOK_ENTRY_APPROVED", "Logbook Entry Approved", `Your weekly logbook entry for ${entry.entryDate} has been analyzed and approved.`, "LOGBOOK_ENTRY", entry.id);
-      const traineeUser = db.users.find(u => u.id === tp.userId);
-      if (traineeUser && traineeUser.phone) {
-        sendSMS(traineeUser.phone, `KNPSS Link: Your logbook entry for ${entry.entryDate} has been approved. Keep up the good work!`);
+app.patch('/api/v1/placements/:id/assign-officer', async (req, res) => {
+  try {
+    const { officerId } = req.body;
+    const pl = await fetchOne('placements', { id: req.params.id });
+    if (!pl) return res.status(404).send('Placement Not Found');
+    const updated = await updateRow('placements', { assignedOfficerId: officerId, updatedAt: new Date().toISOString() }, { id: req.params.id });
+    await logAudit(undefined, 'OFFICER_ASSIGNED_TO_PLACEMENT', 'PLACEMENT', updated.id, { previousOfficer: pl.assignedOfficerId }, { currentOfficer: officerId }, req.ip);
+    const tp = await fetchOne('trainee_profiles', { id: updated.traineeId });
+    const officerObj = officerId ? await fetchOne('users', { id: officerId }) : null;
+    if (tp && officerObj) {
+      await makeNotification(tp.userId, 'OFFICER_ASSIGNED', 'Attachment Cover Appointed', `Officer ${officerObj.fullName} has been designated for your placement assessments.`, 'PLACEMENT', updated.id);
+      if (officerObj.phone) {
+        await sendSMS(officerObj.phone, `KNPSS Link: You have been assigned to evaluate trainee ${tp.admissionNo} at ${updated.companyName}.`);
       }
     }
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Assign officer error:', error);
+    res.status(500).json({ error: 'Failed to assign officer' });
   }
-
-  logAudit(evaluatedBy, "LOGBOOK_ENTRY_APPROVED", "LOGBOOK_ENTRY", entry.id, undefined, entry, req.ip);
-  saveToDisk();
-  res.json(entry);
 });
 
-// 9.5 Attendance Registry Endpoints
-app.get('/api/v1/attendance', (req, res) => {
-  const { placementId, traineeId } = req.query;
-  let list = db.attendanceRecords || [];
-  if (placementId) {
-    list = list.filter(r => r.placementId === placementId);
+app.get('/api/v1/logbook/:placementId/entries', async (req, res) => {
+  try {
+    const entries = await fetchAllWhere('logbook_entries', { placement_id: req.params.placementId });
+    const sorted = (entries as LogbookEntry[]).sort((a, b) => b.entryDate.localeCompare(a.entryDate));
+    res.json(sorted);
+  } catch (error: any) {
+    console.error('Get logbook entries error:', error);
+    res.status(500).json({ error: 'Failed to fetch logbook entries' });
   }
-  if (traineeId) {
-    list = list.filter(r => r.traineeId === traineeId);
-  }
-  res.json(list);
 });
 
-app.post('/api/v1/attendance', (req, res) => {
-  const { records } = req.body;
-  if (!records || !Array.isArray(records)) {
-    const { placementId, traineeId, date, dayOfWeek, status, markedBy } = req.body;
-    if (!placementId || !traineeId || !date || !status) {
-      return res.status(400).json({ error: "Missing required fields" });
+app.post('/api/v1/logbook/:placementId/entries', async (req, res) => {
+  try {
+    const { activitiesDescription, skillsAcquired, toolsUsed, entryDate, supervisorName, fileUrls } = req.body;
+    const placementId = req.params.placementId;
+    const pl = await fetchOne('placements', { id: placementId });
+    if (!pl) return res.status(404).send('Placement Not Found');
+    let weekNumber = 1;
+    if (pl.startDate) {
+      const start = new Date(pl.startDate);
+      const curr = new Date(entryDate);
+      const diffDays = Math.floor((curr.getTime() - start.getTime()) / (24 * 3600 * 1000));
+      weekNumber = Math.max(1, Math.floor(diffDays / 7) + 1);
     }
-    
-    if (!db.attendanceRecords) db.attendanceRecords = [];
+    let isLate = false;
+    const created = Date.now();
+    const entDateMid = new Date(`${entryDate}T23:59:59`).getTime();
+    const lateCutoff = 48 * 3600 * 1000;
+    if (created - entDateMid > lateCutoff) {
+      isLate = true;
+    }
+    const sameDateEntry = await fetchAllWhere('logbook_entries', { placement_id: placementId, entry_date: entryDate });
+    const version = (sameDateEntry as LogbookEntry[]).length + 1;
+    const newEntry: LogbookEntry = {
+      id: `le-${Math.random().toString(36).substr(2, 9)}`,
+      placementId,
+      entryDate,
+      weekNumber,
+      activitiesDescription,
+      skillsAcquired,
+      toolsUsed,
+      supervisorName: supervisorName || pl.supervisorName,
+      fileUrls: fileUrls || [],
+      fileHashes: (fileUrls || []).map(() => Math.random().toString(36).substr(2, 9)),
+      status: 'DRAFT',
+      version,
+      isLate,
+      supervisorAcknowledged: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await insertRow('logbook_entries', newEntry);
+    await logAudit(undefined, 'LOGBOOK_ENTRY_CREATED', 'LOGBOOK_ENTRY', newEntry.id, undefined, newEntry, req.ip);
+    res.status(201).json(newEntry);
+  } catch (error: any) {
+    console.error('Create logbook entry error:', error);
+    res.status(500).json({ error: 'Failed to create logbook entry' });
+  }
+});
 
-    const existingIndex = db.attendanceRecords.findIndex(
-      r => r.placementId === placementId && r.date === date
-    );
+app.get('/api/v1/logbook/entries/:id', async (req, res) => {
+  try {
+    const entry = await fetchOne('logbook_entries', { id: req.params.id });
+    if (!entry) return res.status(404).send('Entry Not Discovered');
+    res.json(entry);
+  } catch (error: any) {
+    console.error('Get logbook entry error:', error);
+    res.status(500).json({ error: 'Failed to fetch logbook entry' });
+  }
+});
 
+app.patch('/api/v1/logbook/entries/:id', async (req, res) => {
+  try {
+    const existing = await fetchOne('logbook_entries', { id: req.params.id });
+    if (!existing) return res.status(404).send('Entry Not Found');
+    const updated = await updateRow('logbook_entries', { ...req.body, updatedAt: new Date().toISOString() }, { id: req.params.id });
+    await logAudit(undefined, 'LOGBOOK_ENTRY_UPDATED', 'LOGBOOK_ENTRY', req.params.id, existing, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Patch logbook entry error:', error);
+    res.status(500).json({ error: 'Failed to update logbook entry' });
+  }
+});
+
+app.post('/api/v1/logbook/entries/:id/submit', async (req, res) => {
+  try {
+    const entry = await fetchOne('logbook_entries', { id: req.params.id });
+    if (!entry) return res.status(404).send('Entry Not Found');
+    const updated = await updateRow('logbook_entries', { status: 'SUBMITTED', updatedAt: new Date().toISOString() }, { id: req.params.id });
+    await logAudit(undefined, 'LOGBOOK_ENTRY_SUBMITTED', 'LOGBOOK_ENTRY', entry.id, undefined, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Submit logbook entry error:', error);
+    res.status(500).json({ error: 'Failed to submit logbook entry' });
+  }
+});
+
+app.post('/api/v1/logbook/entries/:id/approve', async (req, res) => {
+  try {
+    const { rubricScores, comment, evaluatedBy } = req.body;
+    const entry = await fetchOne('logbook_entries', { id: req.params.id });
+    if (!entry) return res.status(404).send('Entry Not Found');
+    const updated = await updateRow('logbook_entries', {
+      status: 'APPROVED',
+      officerComments: comment,
+      rubricScores,
+      reviewedAt: new Date().toISOString(),
+      reviewedBy: evaluatedBy || 'u-officer-1',
+      updatedAt: new Date().toISOString()
+    }, { id: req.params.id });
+    const pl = await fetchOne('placements', { id: updated.placementId });
+    if (pl) {
+      const tp = await fetchOne('trainee_profiles', { id: pl.traineeId });
+      if (tp) {
+        await makeNotification(tp.userId, 'LOGBOOK_ENTRY_APPROVED', 'Logbook Entry Approved', `Your weekly logbook entry for ${updated.entryDate} has been analyzed and approved.`, 'LOGBOOK_ENTRY', updated.id);
+        const traineeUser = await fetchOne('users', { id: tp.userId });
+        if (traineeUser && traineeUser.phone) {
+          await sendSMS(traineeUser.phone, `KNPSS Link: Your logbook entry for ${updated.entryDate} has been approved. Keep up the good work!`);
+        }
+      }
+    }
+    await logAudit(evaluatedBy, 'LOGBOOK_ENTRY_APPROVED', 'LOGBOOK_ENTRY', updated.id, undefined, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Approve logbook entry error:', error);
+    res.status(500).json({ error: 'Failed to approve logbook entry' });
+  }
+});
+
+app.get('/api/v1/attendance', async (req, res) => {
+  try {
+    const { placementId, traineeId } = req.query;
+    let list = await fetchAll('attendance_records');
+    if (placementId) list = (list as AttendanceRecord[]).filter(r => r.placementId === placementId);
+    if (traineeId) list = (list as AttendanceRecord[]).filter(r => r.traineeId === traineeId);
+    res.json(list);
+  } catch (error: any) {
+    console.error('Get attendance error:', error);
+    res.status(500).json({ error: 'Failed to fetch attendance records' });
+  }
+});
+
+app.post('/api/v1/attendance', async (req, res) => {
+  try {
+    const { records } = req.body;
     const now = new Date().toISOString();
-    if (existingIndex > -1) {
-      db.attendanceRecords[existingIndex] = {
-        ...db.attendanceRecords[existingIndex],
-        status,
-        markedBy: markedBy || "John Mwangi",
-        updatedAt: now
-      };
+    let updatedCount = 0;
+    let insertedCount = 0;
+
+    if (!records || !Array.isArray(records)) {
+      const { placementId, traineeId, date, dayOfWeek, status, markedBy } = req.body;
+      if (!placementId || !traineeId || !date || !status) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+      const existing = await fetchOne('attendance_records', { placement_id: placementId, date });
+      if (existing) {
+        await updateRow('attendance_records', { status, markedBy: markedBy || 'John Mwangi', updatedAt: now }, { id: existing.id });
+      } else {
+        const newRec: AttendanceRecord = {
+          id: `att-${Math.random().toString(36).substr(2, 9)}`,
+          placementId,
+          traineeId,
+          date,
+          dayOfWeek: dayOfWeek || 'Monday',
+          status,
+          markedBy: markedBy || 'John Mwangi',
+          createdAt: now,
+          updatedAt: now
+        };
+        await insertRow('attendance_records', newRec);
+      }
+      await logAudit(undefined, 'ATTENDANCE_MARKED', 'ATTENDANCE', placementId, undefined, { date, status }, req.ip);
+      return res.json({ success: true, count: 1 });
+    }
+
+    for (const rec of records) {
+      const { placementId, traineeId, date, dayOfWeek, status, markedBy } = rec;
+      if (!placementId || !date || !status) continue;
+      const existing = await fetchOne('attendance_records', { placement_id: placementId, date });
+      if (existing) {
+        await updateRow('attendance_records', { status, markedBy: markedBy || 'John Mwangi', updatedAt: now }, { id: existing.id });
+        updatedCount++;
+      } else {
+        const newRec: AttendanceRecord = {
+          id: `att-${Math.random().toString(36).substr(2, 9)}`,
+          placementId,
+          traineeId: traineeId || '',
+          date,
+          dayOfWeek: dayOfWeek || 'Monday',
+          status,
+          markedBy: markedBy || 'John Mwangi',
+          createdAt: now,
+          updatedAt: now
+        };
+        await insertRow('attendance_records', newRec);
+        insertedCount++;
+      }
+    }
+
+    if ((records || []).length > 0) {
+      await logAudit(undefined, 'ATTENDANCE_BULK_MARKED', 'ATTENDANCE', undefined, undefined, { updated: updatedCount, inserted: insertedCount }, req.ip);
+    }
+    res.json({ success: true, updated: updatedCount, inserted: insertedCount });
+  } catch (error: any) {
+    console.error('Post attendance error:', error);
+    res.status(500).json({ error: 'Failed to save attendance records' });
+  }
+});
+
+app.post('/api/v1/logbook/entries/:id/reject', async (req, res) => {
+  try {
+    const { comment, evaluatedBy } = req.body;
+    const entry = await fetchOne('logbook_entries', { id: req.params.id });
+    if (!entry) return res.status(404).send('Entry Not Found');
+    const updated = await updateRow('logbook_entries', {
+      status: 'REJECTED',
+      officerComments: comment,
+      reviewedAt: new Date().toISOString(),
+      reviewedBy: evaluatedBy || 'u-officer-1',
+      updatedAt: new Date().toISOString()
+    }, { id: req.params.id });
+    const pl = await fetchOne('placements', { id: updated.placementId });
+    if (pl) {
+      const tp = await fetchOne('trainee_profiles', { id: pl.traineeId });
+      if (tp) {
+        await makeNotification(tp.userId, 'LOGBOOK_ENTRY_REJECTED', 'Logbook Entry Rejected', `Your logbook entry for ${updated.entryDate} was rejected. Feedback: '${comment}'`, 'LOGBOOK_ENTRY', updated.id);
+        const traineeUser = await fetchOne('users', { id: tp.userId });
+        if (traineeUser && traineeUser.phone) {
+          await sendSMS(traineeUser.phone, `KNPSS Link: Your logbook entry for ${updated.entryDate} was rejected. Reason: ${comment}. Please resubmit.`);
+        }
+      }
+    }
+    await logAudit(evaluatedBy, 'LOGBOOK_ENTRY_REJECTED', 'LOGBOOK_ENTRY', updated.id, undefined, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Reject logbook entry error:', error);
+    res.status(500).json({ error: 'Failed to reject logbook entry' });
+  }
+});
+
+app.post('/api/v1/logbook/entries/:id/request-correction', async (req, res) => {
+  try {
+    const { comment, evaluatedBy } = req.body;
+    const entry = await fetchOne('logbook_entries', { id: req.params.id });
+    if (!entry) return res.status(404).send('Entry Not Found');
+    const updated = await updateRow('logbook_entries', {
+      status: 'CORRECTION_REQUESTED',
+      officerComments: comment,
+      reviewedAt: new Date().toISOString(),
+      reviewedBy: evaluatedBy || 'u-officer-1',
+      updatedAt: new Date().toISOString()
+    }, { id: req.params.id });
+    const pl = await fetchOne('placements', { id: updated.placementId });
+    if (pl) {
+      const tp = await fetchOne('trainee_profiles', { id: pl.traineeId });
+      if (tp) {
+        await makeNotification(tp.userId, 'LOGBOOK_ENTRY_CORRECTION', 'Correction Requested', `Please revise your entry for ${updated.entryDate}. Comments: '${comment}'`, 'LOGBOOK_ENTRY', updated.id);
+      }
+    }
+    await logAudit(evaluatedBy, 'LOGBOOK_ENTRY_CORRECTION_REQUESTED', 'LOGBOOK_ENTRY', updated.id, undefined, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Request correction error:', error);
+    res.status(500).json({ error: 'Failed to request logbook correction' });
+  }
+});
+
+app.post('/api/v1/logbook/entries/:id/acknowledge', async (req, res) => {
+  try {
+    const { supervisorComment } = req.body;
+    const entry = await fetchOne('logbook_entries', { id: req.params.id });
+    if (!entry) return res.status(404).send('Entry Not Found');
+    const updated = await updateRow('logbook_entries', {
+      supervisorAcknowledged: true,
+      supervisorComment,
+      supervisorAcknowledgedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }, { id: req.params.id });
+    await logAudit(undefined, 'LOGBOOK_ENTRY_SUPERVISOR_ACKNOWLEDGED', 'LOGBOOK_ENTRY', updated.id, undefined, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Acknowledge logbook entry error:', error);
+    res.status(500).json({ error: 'Failed to acknowledge logbook entry' });
+  }
+});
+
+app.get('/api/v1/logbook/:placementId/gaps', async (req, res) => {
+  try {
+    const entries = await fetchAllWhere('logbook_entries', { placement_id: req.params.placementId });
+    const pl = await fetchOne('placements', { id: req.params.placementId });
+    if (!pl || !pl.startDate) return res.json([]);
+    const filtered = (entries as LogbookEntry[]).filter(le => le.status !== 'DRAFT');
+    const gaps: string[] = [];
+    const start = new Date(pl.startDate);
+    const endLimit = pl.endDate ? new Date(pl.endDate) : new Date();
+    const today = new Date();
+    const compareMax = endLimit.getTime() < today.getTime() ? endLimit : today;
+    const current = new Date(start);
+    while (current.getTime() <= compareMax.getTime()) {
+      const day = current.getDay();
+      if (day !== 0 && day !== 6) {
+        const dateStr = current.toISOString().split('T')[0];
+        const hasEntry = filtered.some(le => le.entryDate === dateStr);
+        if (!hasEntry) gaps.push(dateStr);
+      }
+      current.setDate(current.getDate() + 1);
+    }
+    res.json(gaps.slice(0, 10));
+  } catch (error: any) {
+    console.error('Get logbook gaps error:', error);
+    res.status(500).json({ error: 'Failed to compute logbook gaps' });
+  }
+});
+
+app.get('/api/v1/logbook/:placementId/progress', async (req, res) => {
+  try {
+    const entries = await fetchAllWhere('logbook_entries', { placement_id: req.params.placementId });
+    const totalExpected = 60;
+    const submitted = (entries as LogbookEntry[]).filter(le => le.status !== 'DRAFT').length;
+    const approved = (entries as LogbookEntry[]).filter(le => le.status === 'APPROVED').length;
+    const percentage = Math.round((approved / totalExpected) * 100);
+    res.json({ totalExpected, submitted, approved, percentage: Math.min(100, percentage) });
+  } catch (error: any) {
+    console.error('Get logbook progress error:', error);
+    res.status(500).json({ error: 'Failed to compute logbook progress' });
+  }
+});
+
+app.get('/api/v1/assessments/:placementId', async (req, res) => {
+  try {
+    const assessment = await fetchOne('assessments', { placement_id: req.params.placementId });
+    if (!assessment) return res.status(404).send('Assessment Not Recorded');
+    res.json(assessment);
+  } catch (error: any) {
+    console.error('Get assessments error:', error);
+    res.status(500).json({ error: 'Failed to fetch assessment' });
+  }
+});
+
+app.post('/api/v1/assessments', async (req, res) => {
+  try {
+    const { placementId, officerId, visitDate, physicalLogbookPresent, entriesMatchUploads, supervisorConfirmed, discrepancyNotes, practicalNotes, overallScore, siteEvidenceUrls } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
+    const newAs: Assessment = {
+      id: `as-${Math.random().toString(36).substr(2, 9)}`,
+      placementId,
+      officerId,
+      visitDate: visitDate || new Date().toISOString().split('T')[0],
+      physicalLogbookPresent: physicalLogbookPresent === true || physicalLogbookPresent === 'true',
+      entriesMatchUploads: entriesMatchUploads === true || entriesMatchUploads === 'true',
+      supervisorConfirmed: supervisorConfirmed === true || supervisorConfirmed === 'true',
+      discrepancyNotes,
+      practicalNotes,
+      overallScore: Number(overallScore || 8),
+      siteEvidenceUrls: siteEvidenceUrls || [],
+      credibilityAuthorized: false,
+      createdAt: new Date().toISOString()
+    };
+    const existing = await fetchOne('assessments', { placement_id: placementId });
+    let savedAssessment: any;
+    if (existing) {
+      savedAssessment = await updateRow('assessments', newAs, { placement_id: placementId });
     } else {
-      const newRec: AttendanceRecord = {
-        id: `att-${Math.random().toString(36).substr(2, 9)}`,
-        placementId,
-        traineeId,
-        date,
-        dayOfWeek: dayOfWeek || "Monday",
-        status,
-        markedBy: markedBy || "John Mwangi",
-        createdAt: now,
-        updatedAt: now
-      };
-      db.attendanceRecords.push(newRec);
+      savedAssessment = await insertRow('assessments', newAs);
     }
-    logAudit(undefined, "ATTENDANCE_MARKED", "ATTENDANCE", placementId, undefined, { date, status }, req.ip);
-    saveToDisk();
-    return res.json({ success: true, count: 1 });
-  }
-
-  if (!db.attendanceRecords) db.attendanceRecords = [];
-  const now = new Date().toISOString();
-  let updatedCount = 0;
-  let insertedCount = 0;
-
-  for (const rec of records) {
-    const { placementId, traineeId, date, dayOfWeek, status, markedBy } = rec;
-    if (!placementId || !date || !status) continue;
-
-    const existingIndex = db.attendanceRecords.findIndex(
-      r => r.placementId === placementId && r.date === date
-    );
-
-    if (existingIndex > -1) {
-      db.attendanceRecords[existingIndex] = {
-        ...db.attendanceRecords[existingIndex],
-        status,
-        markedBy: markedBy || "John Mwangi",
-        updatedAt: now
-      };
-      updatedCount++;
-    } else {
-      const newRec: AttendanceRecord = {
-        id: `att-${Math.random().toString(36).substr(2, 9)}`,
-        placementId,
-        traineeId: traineeId || "",
-        date,
-        dayOfWeek: dayOfWeek || "Monday",
-        status,
-        markedBy: markedBy || "John Mwangi",
-        createdAt: now,
-        updatedAt: now
-      };
-      db.attendanceRecords.push(newRec);
-      insertedCount++;
-    }
-  }
-
-  if (records.length > 0) {
-    logAudit(undefined, "ATTENDANCE_BULK_MARKED", "ATTENDANCE", undefined, undefined, { updated: updatedCount, inserted: insertedCount }, req.ip);
-    saveToDisk();
-  }
-
-  res.json({ success: true, updated: updatedCount, inserted: insertedCount });
-});
-
-app.post('/api/v1/logbook/entries/:id/reject', (req, res) => {
-  const { comment, evaluatedBy } = req.body;
-  const entry = db.logbookEntries.find(le => le.id === req.params.id);
-  if (!entry) return res.status(404).send("Entry Not Found");
-
-  entry.status = "REJECTED";
-  entry.officerComments = comment;
-  entry.reviewedAt = new Date().toISOString();
-  entry.reviewedBy = evaluatedBy || "u-officer-1";
-  entry.updatedAt = new Date().toISOString();
-
-  // Trigger Notification to Trainee
-  const pl = db.placements.find(p => p.id === entry.placementId);
-  if (pl) {
-    const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-    if (tp) {
-      makeNotification(tp.userId, "LOGBOOK_ENTRY_REJECTED", "Logbook Entry Rejected", `Your logbook entry for ${entry.entryDate} was rejected. Feedback: '${comment}'`, "LOGBOOK_ENTRY", entry.id);
-      const traineeUser = db.users.find(u => u.id === tp.userId);
-      if (traineeUser && traineeUser.phone) {
-        sendSMS(traineeUser.phone, `KNPSS Link: Your logbook entry for ${entry.entryDate} was rejected. Reason: ${comment}. Please resubmit.`);
+    const pl = await fetchOne('placements', { id: placementId });
+    if (pl) {
+      await updateRow('placements', { status: 'ASSESSED', updatedAt: new Date().toISOString() }, { id: pl.id });
+      const tp = await fetchOne('trainee_profiles', { id: pl.traineeId });
+      if (tp) {
+        await makeNotification(tp.userId, 'ASSESSMENT_COMPLETED', 'Site Field Visit Completed', 'Your physical field assessment has been authorized by Officer Mary Wanjiku.', 'PLACEMENT', pl.id);
+        const traineeUser = await fetchOne('users', { id: tp.userId });
+        if (traineeUser && traineeUser.phone) {
+          await sendSMS(traineeUser.phone, 'KNPSS Link: Your field visit has been successfully authorized by Mary Wanjiku. Status marked: Assessed.');
+        }
       }
     }
+    await logAudit(officerId, 'SITE_FIELD_VERIFICATION_CREATED', 'ASSESSMENT', newAs.id, undefined, newAs, req.ip);
+    res.status(201).json(savedAssessment);
+  } catch (error: any) {
+    console.error('Create assessment error:', error);
+    res.status(500).json({ error: 'Failed to create assessment' });
   }
-
-  logAudit(evaluatedBy, "LOGBOOK_ENTRY_REJECTED", "LOGBOOK_ENTRY", entry.id, undefined, entry, req.ip);
-  saveToDisk();
-  res.json(entry);
 });
 
-app.post('/api/v1/logbook/entries/:id/request-correction', (req, res) => {
-  const { comment, evaluatedBy } = req.body;
-  const entry = db.logbookEntries.find(le => le.id === req.params.id);
-  if (!entry) return res.status(404).send("Entry Not Found");
-
-  entry.status = "CORRECTION_REQUESTED";
-  entry.officerComments = comment;
-  entry.reviewedAt = new Date().toISOString();
-  entry.reviewedBy = evaluatedBy || "u-officer-1";
-  entry.updatedAt = new Date().toISOString();
-
-  // Trigger Notification to Trainee
-  const pl = db.placements.find(p => p.id === entry.placementId);
-  if (pl) {
-    const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-    if (tp) {
-      makeNotification(tp.userId, "LOGBOOK_ENTRY_CORRECTION", "Correction Requested", `Please revise your entry for ${entry.entryDate}. Comments: '${comment}'`, "LOGBOOK_ENTRY", entry.id);
-    }
-  }
-
-  logAudit(evaluatedBy, "LOGBOOK_ENTRY_CORRECTION_REQUESTED", "LOGBOOK_ENTRY", entry.id, undefined, entry, req.ip);
-  saveToDisk();
-  res.json(entry);
-});
-
-app.post('/api/v1/logbook/entries/:id/acknowledge', (req, res) => {
-  const { supervisorComment } = req.body;
-  const entry = db.logbookEntries.find(le => le.id === req.params.id);
-  if (!entry) return res.status(404).send("Entry Not Found");
-
-  entry.supervisorAcknowledged = true;
-  entry.supervisorComment = supervisorComment;
-  entry.supervisorAcknowledgedAt = new Date().toISOString();
-  entry.updatedAt = new Date().toISOString();
-
-  logAudit(undefined, "LOGBOOK_ENTRY_SUPERVISOR_ACKNOWLEDGED", "LOGBOOK_ENTRY", entry.id, undefined, entry, req.ip);
-  saveToDisk();
-  res.json(entry);
-});
-
-app.get('/api/v1/logbook/:placementId/gaps', (req, res) => {
-  const entries = db.logbookEntries.filter(le => le.placementId === req.params.placementId && le.status !== 'DRAFT');
-  const pl = db.placements.find(p => p.id === req.params.placementId);
-  if (!pl || !pl.startDate) return res.json([]);
-
-  const gaps: string[] = [];
-  const start = new Date(pl.startDate);
-  // Compare until today or end date
-  const endLimit = pl.endDate ? new Date(pl.endDate) : new Date();
-  const today = new Date();
-  const compareMax = endLimit.getTime() < today.getTime() ? endLimit : today;
-
-  const current = new Date(start);
-  while (current.getTime() <= compareMax.getTime()) {
-    // Skip weekends
-    const day = current.getDay();
-    if (day !== 0 && day !== 6) {
-      const dateStr = current.toISOString().split('T')[0];
-      const hasEntry = entries.some(le => le.entryDate === dateStr);
-      if (!hasEntry) {
-        gaps.push(dateStr);
+app.post('/api/v1/assessments/:id/authorize', async (req, res) => {
+  try {
+    const assessment = await fetchOne('assessments', { id: req.params.id });
+    if (!assessment) return res.status(404).send('Assessment Not Found');
+    const updated = await updateRow('assessments', { credibilityAuthorized: true, authorizedAt: new Date().toISOString() }, { id: req.params.id });
+    const pl = await fetchOne('placements', { id: assessment.placementId });
+    if (pl) {
+      await updateRow('placements', { status: 'COMPLETED', updatedAt: new Date().toISOString() }, { id: pl.id });
+      const tp = await fetchOne('trainee_profiles', { id: pl.traineeId });
+      if (tp) {
+        await makeNotification(tp.userId, 'CREDIBILITY_GRANTED', 'Attachment Status: Completed!', 'Your digital dossier has been approved and completed successfully!', 'PLACEMENT', pl.id);
       }
     }
-    current.setDate(current.getDate() + 1);
+    await logAudit(undefined, 'ASSESSMENT_CREDIBILITY_AUTHORIZED', 'ASSESSMENT', updated.id, undefined, updated, req.ip);
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Authorize assessment error:', error);
+    res.status(500).json({ error: 'Failed to authorize assessment' });
   }
-
-  res.json(gaps.slice(0, 10)); // return last 10 missing dates
 });
 
-app.get('/api/v1/logbook/:placementId/progress', (req, res) => {
-  const entries = db.logbookEntries.filter(le => le.placementId === req.params.placementId);
-  const totalExpected = 60; // 12 weeks * 5 working days
-  const submitted = entries.filter(le => le.status !== 'DRAFT').length;
-  const approved = entries.filter(le => le.status === 'APPROVED').length;
-  const percentage = Math.round((approved / totalExpected) * 100);
-
-  res.json({
-    totalExpected,
-    submitted,
-    approved,
-    percentage: Math.min(100, percentage)
-  });
-});
-
-
-// 9.5 Assessments Endpoints
-app.get('/api/v1/assessments/:placementId', (req, res) => {
-  const as = db.assessments.find(a => a.placementId === req.params.placementId);
-  if (!as) return res.status(404).send("Assessment Not Recorded");
-  res.json(as);
-});
-
-app.post('/api/v1/assessments', (req, res) => {
-  const { 
-    placementId, officerId, visitDate, physicalLogbookPresent, 
-    entriesMatchUploads, supervisorConfirmed, discrepancyNotes, 
-    practicalNotes, overallScore, siteEvidenceUrls 
-  } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
-
-  // Set default ID
-  const newAs: Assessment = {
-    id: `as-${Math.random().toString(36).substr(2, 9)}`,
-    placementId,
-    officerId,
-    visitDate: visitDate || new Date().toISOString().split('T')[0],
-    physicalLogbookPresent: physicalLogbookPresent === true || physicalLogbookPresent === 'true',
-    entriesMatchUploads: entriesMatchUploads === true || entriesMatchUploads === 'true',
-    supervisorConfirmed: supervisorConfirmed === true || supervisorConfirmed === 'true',
-    discrepancyNotes,
-    practicalNotes,
-    overallScore: Number(overallScore || 8),
-    siteEvidenceUrls: siteEvidenceUrls || [],
-    credibilityAuthorized: false,
-    createdAt: new Date().toISOString()
-  };
-
-  // Find index if already exists (enforces 1 assessment record limit)
-  const idx = db.assessments.findIndex(a => a.placementId === placementId);
-  if (idx !== -1) {
-    db.assessments[idx] = newAs;
-  } else {
-    db.assessments.push(newAs);
-  }
-
-  // Set placement status to VERIFIED_ONSITE / completed
-  const pl = db.placements.find(p => p.id === placementId);
-  if (pl) {
-    pl.status = 'ASSESSED';
-    pl.updatedAt = new Date().toISOString();
-
-    // Trigger Notification
-    const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-    if (tp) {
-      makeNotification(tp.userId, "ASSESSMENT_COMPLETED", "Site Field Visit Completed", `Your physical field assessment has been authorized by Officer Mary Wanjiku.`, "PLACEMENT", pl.id);
-      const traineeUser = db.users.find(u => u.id === tp.userId);
-      if (traineeUser && traineeUser.phone) {
-        sendSMS(traineeUser.phone, `KNPSS Link: Your field visit has been successfully authorized by Mary Wanjiku. Status marked: Assessed.`);
-      }
-    }
-  }
-
-  logAudit(officerId, "SITE_FIELD_VERIFICATION_CREATED", "ASSESSMENT", newAs.id, undefined, newAs, req.ip);
-  saveToDisk();
-
-  res.status(201).json(newAs);
-});
-
-app.post('/api/v1/assessments/:id/authorize', (req, res) => {
-  const as = db.assessments.find(a => a.id === req.params.id);
-  if (!as) return res.status(404).send("Assessment Not Found");
-
-  as.credibilityAuthorized = true;
-  as.authorizedAt = new Date().toISOString();
-
-  // Set placement status to COMPLETED
-  const pl = db.placements.find(p => p.id === as.placementId);
-  if (pl) {
-    pl.status = 'COMPLETED';
-    pl.updatedAt = new Date().toISOString();
-
-    const tp = db.traineeProfiles.find(t => t.id === pl.traineeId);
-    if (tp) {
-      makeNotification(tp.userId, "CREDIBILITY_GRANTED", "Attachment Status: Completed!", `Your digital dossier has been approved and completed successfully!`, "PLACEMENT", pl.id);
-    }
-  }
-
-  logAudit(undefined, "ASSESSMENT_CREDIBILITY_AUTHORIZED", "ASSESSMENT", as.id, undefined, as, req.ip);
-  saveToDisk();
-  res.json(as);
-});
-
-
-// File Upload Support for Real PDF layouts
-app.post('/api/v1/upload', (req, res) => {
+app.post('/api/v1/upload', async (req, res) => {
   try {
     const { name, type, base64 } = req.body;
     if (!name || !base64) {
-      return res.status(400).json({ error: "Missing filename or file content" });
+      return res.status(400).json({ error: 'Missing filename or file content' });
     }
-
-    // Clean up base64 prefix if present
-    const base64Data = base64.replace(/^data:.*;base64,/, "");
+    const base64Data = String(base64).replace(/^data:.*;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
-
-    // Create unique filename to prevent overwrite
     const fileId = `${Date.now()}-${name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    const filePath = path.join(process.cwd(), 'uploads', fileId);
-
-    fs.writeFileSync(filePath, buffer);
-
-    // Return the stable endpoint URL
-    res.json({
-      fileUrl: `/api/v1/files/${fileId}`,
-      originalName: name
-    });
+    const { data, error } = await supabase.storage.from('attachments').upload(fileId, buffer, { contentType: type || 'application/octet-stream' });
+    if (error) {
+      console.error('Supabase upload error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    const publicUrlData = supabase.storage.from('attachments').getPublicUrl(fileId);
+    if (!publicUrlData.data?.publicUrl) {
+      console.error('Supabase public url error:', 'missing publicUrl');
+      return res.status(500).json({ error: 'Failed to generate public URL' });
+    }
+    res.json({ fileUrl: publicUrlData.data.publicUrl, originalName: name });
   } catch (error: any) {
-    console.error("Upload error:", error);
+    console.error('Upload error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/v1/files/:filename', (req, res) => {
-  const filePath = path.join(process.cwd(), 'uploads', req.params.filename);
-  if (fs.existsSync(filePath)) {
-    // Determine content type
-    let contentType = 'application/octet-stream';
-    const ext = path.extname(filePath).toLowerCase();
-    if (ext === '.pdf') contentType = 'application/pdf';
-    else if (ext === '.png') contentType = 'image/png';
-    else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
-    else if (ext === '.doc') contentType = 'application/msword';
-    else if (ext === '.docx') contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-    res.setHeader('Content-Type', contentType);
-    // Explicitly set content-disposition to inline so that pdf reads inside viewport framing
-    res.setHeader('Content-Disposition', 'inline');
-    res.sendFile(filePath);
-  } else {
-    res.status(404).send('File not found');
+app.get('/api/v1/documents', async (req, res) => {
+  try {
+    const documents = await fetchAll('institutional_documents');
+    res.json(documents);
+  } catch (error: any) {
+    console.error('Get documents error:', error);
+    res.status(500).json({ error: 'Failed to fetch documents' });
   }
 });
 
-
-// 9.6 Documents Endpoints
-app.get('/api/v1/documents', (req, res) => {
-  res.json(db.documents);
+app.post('/api/v1/documents', async (req, res) => {
+  try {
+    const { title, category, version, fileUrl, visibility, visibilityFilter, downloadPolicy, downloadLimit, validationCode } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
+    const newDoc: InstitutionalDocument = {
+      id: `doc-${Math.random().toString(36).substr(2, 9)}`,
+      title,
+      category,
+      version,
+      fileUrl: fileUrl || 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      fileHash: `fh-${Math.random().toString(36).substring(3, 11)}`,
+      visibility: visibility || 'ALL',
+      visibilityFilter,
+      downloadPolicy: downloadPolicy || 'UNLIMITED',
+      downloadLimit: downloadLimit ? Number(downloadLimit) : undefined,
+      isActive: true,
+      uploadedBy: 'u-admin-1',
+      createdAt: new Date().toISOString(),
+      validationCode: validationCode || undefined
+    };
+    await insertRow('institutional_documents', newDoc);
+    const trainees = await fetchAll('users', q => q.eq('role', 'TRAINEE'));
+    await Promise.all((trainees as User[]).map(trainee => makeNotification(trainee.id, 'NEW_DOCUMENT', 'Revised Policy Bulletin Published', `Institutional document '${title}' has been issued and is available for review.`, 'DOCUMENT', newDoc.id)));
+    await logAudit(undefined, 'DOCUMENT_UPLOADED_ADMIN', 'DOCUMENT', newDoc.id, undefined, newDoc, req.ip);
+    res.status(201).json(newDoc);
+  } catch (error: any) {
+    console.error('Create document error:', error);
+    res.status(500).json({ error: 'Failed to create document' });
+  }
 });
 
-app.post('/api/v1/documents', (req, res) => {
-  const { title, category, version, fileUrl, visibility, visibilityFilter, downloadPolicy, downloadLimit, validationCode } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
-  
-  const newDoc: InstitutionalDocument = {
-    id: `doc-${Math.random().toString(36).substr(2, 9)}`,
-    title,
-    category,
-    version,
-    fileUrl: fileUrl || "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-    fileHash: `fh-${Math.random().toString(36).substring(3, 11)}`,
-    visibility: visibility || "ALL",
-    visibilityFilter,
-    downloadPolicy: downloadPolicy || "UNLIMITED",
-    downloadLimit: downloadLimit ? Number(downloadLimit) : undefined,
-    isActive: true,
-    uploadedBy: "u-admin-1",
-    createdAt: new Date().toISOString(),
-    validationCode: validationCode || undefined
-  };
-
-  db.documents.push(newDoc);
-  
-  // Create notifications for all eligible users
-  db.users.filter(u => u.role === 'TRAINEE').forEach(trainee => {
-    makeNotification(trainee.id, "NEW_DOCUMENT", "Revised Policy Bulletin Published", `Institutional document '${title}' has been issued and is available for review.`, "DOCUMENT", newDoc.id);
-  });
-
-  logAudit(undefined, "DOCUMENT_UPLOADED_ADMIN", "DOCUMENT", newDoc.id, undefined, newDoc, req.ip);
-  saveToDisk();
-
-  res.status(201).json(newDoc);
-});
-
-app.post('/api/v1/documents/:id/download', (req, res) => {
-  const { userId } = req.body;
-  const doc = db.documents.find(d => d.id === req.params.id);
-  if (!doc) return res.status(404).send("Document not located");
-
-  // Check Download policy limits
-  if (doc.downloadPolicy !== "UNLIMITED") {
-    let entitlement = db.documentEntitlements.find(e => e.documentId === doc.id && e.userId === userId);
+app.post('/api/v1/documents/:id/download', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const doc = await fetchOne('institutional_documents', { id: req.params.id });
+    if (!doc) return res.status(404).send('Document not located');
+    let entitlement = await fetchOne('document_entitlements', { document_id: doc.id, user_id: userId });
     if (!entitlement) {
-      entitlement = {
+      entitlement = await insertRow('document_entitlements', {
         id: `ent-${Math.random().toString(36).substr(2, 9)}`,
         documentId: doc.id,
         userId,
         downloadsUsed: 0
-      };
-      db.documentEntitlements.push(entitlement);
-    }
-
-    const limit = doc.downloadPolicy === "SINGLE" ? 1 : (doc.downloadLimit || 1);
-    if (entitlement.downloadsUsed >= limit) {
-      return res.status(403).json({
-        type: "about:blank",
-        title: "Forbidden",
-        status: 403,
-        detail: `Download limitation reached. You have consumed all ${limit} allocated download rights for this document.`
       });
     }
-
-    // Increment
-    entitlement.downloadsUsed += 1;
-    entitlement.lastDownloadAt = new Date().toISOString();
-  }
-
-  // Log successful event
-  const event: DownloadEvent = {
-    id: `ev-${Math.random().toString(36).substr(2, 9)}`,
-    documentId: doc.id,
-    userId,
-    documentVersion: doc.version,
-    ipAddress: req.ip || "127.0.0.1",
-    userAgent: req.headers['user-agent'],
-    success: true,
-    createdAt: new Date().toISOString()
-  };
-  db.downloadEvents.push(event);
-
-  logAudit(userId, "DOCUMENT_DOWNLOAD_VERIFIED", "DOCUMENT", doc.id, undefined, { version: doc.version }, req.ip);
-  saveToDisk();
-
-  res.json({
-    signedUrl: doc.fileUrl,
-    enforcedPolicy: doc.downloadPolicy,
-    downloadsRemaining: doc.downloadPolicy === 'UNLIMITED' ? 'UNLIMITED' : Math.max(0, (doc.downloadPolicy === 'SINGLE' ? 1 : (doc.downloadLimit || 1)) - (db.documentEntitlements.find(e => e.documentId === doc.id && e.userId === userId)?.downloadsUsed || 0))
-  });
-});
-
-app.post('/api/v1/documents/:id/reset-entitlement/:userId', (req, res) => {
-  const entitlement = db.documentEntitlements.find(e => e.documentId === req.params.id && e.userId === req.params.userId);
-  if (entitlement) {
-    entitlement.downloadsUsed = 0;
-    entitlement.resetAt = new Date().toISOString();
-    entitlement.resetBy = "u-admin-1";
-    logAudit(undefined, "DOCUMENT_ENTITLEMENT_RESET", "DOCUMENT", req.params.id, undefined, { resetTrainee: req.params.userId }, req.ip);
-    saveToDisk();
-  }
-  res.json({ status: "success", detail: "Trainee entitlements reset." });
-});
-
-app.get('/api/v1/documents/:id/download-log', (req, res) => {
-  const logs = db.downloadEvents.filter(e => e.documentId === req.params.id);
-  const enriched = logs.map(l => {
-    const u = db.users.find(usr => usr.id === l.userId);
-    return { ...l, user: u };
-  });
-  res.json(enriched);
-});
-
-
-// 9.7 Notifications Endpoints
-app.get('/api/v1/notifications', (req, res) => {
-  const userId = req.query.userId as string;
-  const list = db.notifications.filter(n => !userId || n.userId === userId);
-  res.json(list);
-});
-
-app.patch('/api/v1/notifications/:id/read', (req, res) => {
-  const n = db.notifications.find(not => not.id === req.params.id);
-  if (n) {
-    n.isRead = true;
-    saveToDisk();
-  }
-  res.json({ success: true });
-});
-
-app.post('/api/v1/notifications/mark-all-read', (req, res) => {
-  const { userId } = req.body;
-  db.notifications.forEach(n => {
-    if (n.userId === userId) {
-      n.isRead = true;
+    if (doc.downloadPolicy !== 'UNLIMITED') {
+      const limit = doc.downloadPolicy === 'SINGLE' ? 1 : (doc.downloadLimit || 1);
+      if ((entitlement.downloadsUsed || 0) >= limit) {
+        return res.status(403).json({ type: 'about:blank', title: 'Forbidden', status: 403, detail: `Download limitation reached. You have consumed all ${limit} allocated download rights for this document.` });
+      }
+      await updateRow('document_entitlements', { downloadsUsed: (entitlement.downloadsUsed || 0) + 1, lastDownloadAt: new Date().toISOString() }, { id: entitlement.id });
     }
-  });
-  saveToDisk();
-  res.json({ success: true });
+    await insertRow('download_events', {
+      id: `ev-${Math.random().toString(36).substr(2, 9)}`,
+      documentId: doc.id,
+      userId,
+      documentVersion: doc.version,
+      ipAddress: req.ip || '127.0.0.1',
+      userAgent: req.headers['user-agent'] as string,
+      success: true,
+      createdAt: new Date().toISOString()
+    });
+    await logAudit(userId, 'DOCUMENT_DOWNLOAD_VERIFIED', 'DOCUMENT', doc.id, undefined, { version: doc.version }, req.ip);
+    const downloadsRemaining = doc.downloadPolicy === 'UNLIMITED' ? 'UNLIMITED' : Math.max(0, (doc.downloadPolicy === 'SINGLE' ? 1 : (doc.downloadLimit || 1)) - ((entitlement.downloadsUsed || 0) + 1));
+    res.json({ signedUrl: doc.fileUrl, enforcedPolicy: doc.downloadPolicy, downloadsRemaining });
+  } catch (error: any) {
+    console.error('Document download error:', error);
+    res.status(500).json({ error: 'Failed to process document download' });
+  }
 });
 
-app.get('/api/v1/notifications/unread-count', (req, res) => {
-  const userId = req.query.userId as string;
-  const count = db.notifications.filter(n => n.userId === userId && !n.isRead).length;
-  res.json({ count });
+app.post('/api/v1/documents/:id/reset-entitlement/:userId', async (req, res) => {
+  try {
+    const entitlement = await fetchOne('document_entitlements', { document_id: req.params.id, user_id: req.params.userId });
+    if (entitlement) {
+      await updateRow('document_entitlements', { downloadsUsed: 0, resetAt: new Date().toISOString(), resetBy: 'u-admin-1' }, { id: entitlement.id });
+      await logAudit(undefined, 'DOCUMENT_ENTITLEMENT_RESET', 'DOCUMENT', req.params.id, undefined, { resetTrainee: req.params.userId }, req.ip);
+    }
+    res.json({ status: 'success', detail: 'Trainee entitlements reset.' });
+  } catch (error: any) {
+    console.error('Reset entitlement error:', error);
+    res.status(500).json({ error: 'Failed to reset entitlement' });
+  }
 });
 
+app.get('/api/v1/documents/:id/download-log', async (req, res) => {
+  try {
+    const logs = await fetchAllWhere('download_events', { document_id: req.params.id });
+    const users = await fetchAll('users');
+    const enriched = (logs as DownloadEvent[]).map(l => ({ ...l, user: users.find((u: User) => u.id === l.userId) }));
+    res.json(enriched);
+  } catch (error: any) {
+    console.error('Get download log error:', error);
+    res.status(500).json({ error: 'Failed to fetch download log' });
+  }
+});
 
-// 9.8 Dossier PDF export simulated (instantly resolves, returns formatted URL/data)
+app.get('/api/v1/notifications', async (req, res) => {
+  try {
+    const userId = req.query.userId as string;
+    let list = await fetchAll('app_notifications');
+    if (userId) list = (list as AppNotification[]).filter(n => n.userId === userId);
+    res.json(list);
+  } catch (error: any) {
+    console.error('Get notifications error:', error);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+app.patch('/api/v1/notifications/:id/read', async (req, res) => {
+  try {
+    const notification = await fetchOne('app_notifications', { id: req.params.id });
+    if (notification) await updateRow('app_notifications', { isRead: true }, { id: req.params.id });
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Mark notification read error:', error);
+    res.status(500).json({ error: 'Failed to mark notification as read' });
+  }
+});
+
+app.post('/api/v1/notifications/mark-all-read', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const notifications = await fetchAllWhere('app_notifications', { user_id: userId });
+    await Promise.all((notifications as AppNotification[]).map(n => updateRow('app_notifications', { isRead: true }, { id: n.id })));
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Mark all notifications read error:', error);
+    res.status(500).json({ error: 'Failed to mark all notifications as read' });
+  }
+});
+
+app.get('/api/v1/notifications/unread-count', async (req, res) => {
+  try {
+    const userId = req.query.userId as string;
+    const notifications = await fetchAllWhere('app_notifications', { user_id: userId });
+    const count = (notifications as AppNotification[]).filter(n => !n.isRead).length;
+    res.json({ count });
+  } catch (error: any) {
+    console.error('Get unread count error:', error);
+    res.status(500).json({ error: 'Failed to fetch unread notification count' });
+  }
+});
+
 app.post('/api/v1/exports/dossier/:placementId', (req, res) => {
-  const plId = req.params.placementId;
   const dId = `export-${Math.random().toString(36).substr(2, 9)}`;
-  
-  res.json({
-    exportId: dId,
-    status: "ready",
-    downloadUrl: `/api/v1/exports/${dId}/download?placementId=${plId}`
-  });
+  res.json({ exportId: dId, status: 'ready', downloadUrl: `/api/v1/exports/${dId}/download?placementId=${req.params.placementId}` });
 });
 
 app.get('/api/v1/exports/:id/status', (req, res) => {
-  res.json({ status: "ready" });
+  res.json({ status: 'ready' });
 });
 
 app.get('/api/v1/exports/:id/download', (req, res) => {
-  // Simulates final student dossier download file headers
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename=KNPSS_Dossier_Export_${req.params.id}.pdf`);
-  res.send(Buffer.from("MOCK_PDF_DATA_KNPSS_PORTFOLIO"));
+  res.send(Buffer.from('MOCK_PDF_DATA_KNPSS_PORTFOLIO'));
 });
 
-
-// 9.9 Analytics
-app.get('/api/v1/analytics/overview', (req, res) => {
-  res.json({
-    totalTrainees: db.users.filter(u => u.role === 'TRAINEE').length,
-    placedRate: Math.round((db.placements.filter(p => p.status !== 'UNPLACED').length / Math.max(1, db.users.filter(u => u.role==='TRAINEE').length)) * 100),
-    activeAttachmentsCount: db.placements.filter(p => p.status === 'ACTIVE').length,
-    completedAssessmentsCount: db.assessments.length,
-    documentsCount: db.documents.length,
-    pendingReviews: db.logbookEntries.filter(le => le.status === 'SUBMITTED').length
-  });
+app.get('/api/v1/analytics/overview', async (req, res) => {
+  try {
+    const users = await fetchAll('users');
+    const placements = await fetchAll('placements');
+    const assessments = await fetchAll('assessments');
+    const documents = await fetchAll('institutional_documents');
+    const logbookEntries = await fetchAll('logbook_entries');
+    res.json({
+      totalTrainees: (users as User[]).filter(u => u.role === 'TRAINEE').length,
+      placedRate: Math.round(((placements as Placement[]).filter(p => p.status !== 'UNPLACED').length / Math.max(1, (users as User[]).filter(u => u.role === 'TRAINEE').length)) * 100),
+      activeAttachmentsCount: (placements as Placement[]).filter(p => p.status === 'ACTIVE').length,
+      completedAssessmentsCount: (assessments as Assessment[]).length,
+      documentsCount: (documents as InstitutionalDocument[]).length,
+      pendingReviews: (logbookEntries as LogbookEntry[]).filter(le => le.status === 'SUBMITTED').length
+    });
+  } catch (error: any) {
+    console.error('Get analytics overview error:', error);
+    res.status(500).json({ error: 'Failed to fetch analytics overview' });
+  }
 });
 
-app.get('/api/v1/analytics/placement-stats', (req, res) => {
-  res.json([
-    { name: "Unplaced", count: db.users.filter(u => u.role === 'TRAINEE').length - db.placements.length, color: "#9CA3AF" },
-    { name: "Placed", count: db.placements.filter(p => p.status === 'PLACED').length, color: "#1565C0" },
-    { name: "Active", count: db.placements.filter(p => p.status === 'ACTIVE').length, color: "#F57F17" },
-    { name: "Assessed", count: db.placements.filter(p => p.status === 'ASSESSED').length, color: "#6A1B9A" },
-    { name: "Completed", count: db.placements.filter(p => p.status === 'COMPLETED').length, color: "#2E7D32" }
-  ]);
+app.get('/api/v1/analytics/placement-stats', async (req, res) => {
+  try {
+    const users = await fetchAll('users');
+    const placements = await fetchAll('placements');
+    const traineeCount = (users as User[]).filter(u => u.role === 'TRAINEE').length;
+    const placementList = placements as Placement[];
+    res.json([
+      { name: 'Unplaced', count: traineeCount - placementList.length, color: '#9CA3AF' },
+      { name: 'Placed', count: placementList.filter(p => p.status === 'PLACED').length, color: '#1565C0' },
+      { name: 'Active', count: placementList.filter(p => p.status === 'ACTIVE').length, color: '#F57F17' },
+      { name: 'Assessed', count: placementList.filter(p => p.status === 'ASSESSED').length, color: '#6A1B9A' },
+      { name: 'Completed', count: placementList.filter(p => p.status === 'COMPLETED').length, color: '#2E7D32' }
+    ]);
+  } catch (error: any) {
+    console.error('Get placement stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch placement stats' });
+  }
 });
 
 app.get('/api/v1/analytics/submission-trend', (req, res) => {
-  // Return last 7 week days of submissions
   res.json([
-    { day: "Mon", submissions: 14, approved: 12 },
-    { day: "Tue", submissions: 19, approved: 17 },
-    { day: "Wed", submissions: 22, approved: 18 },
-    { day: "Thu", submissions: 15, approved: 15 },
-    { day: "Fri", submissions: 26, approved: 23 },
-    { day: "Sat", submissions: 5, approved: 4 },
-    { day: "Sun", submissions: 2, approved: 2 }
+    { day: 'Mon', submissions: 14, approved: 12 },
+    { day: 'Tue', submissions: 19, approved: 17 },
+    { day: 'Wed', submissions: 22, approved: 18 },
+    { day: 'Thu', submissions: 15, approved: 15 },
+    { day: 'Fri', submissions: 26, approved: 23 },
+    { day: 'Sat', submissions: 5, approved: 4 },
+    { day: 'Sun', submissions: 2, approved: 2 }
   ]);
 });
 
 app.get('/api/v1/analytics/missing-logbooks', (req, res) => {
-  // Returns student detail having high gap rates
-  res.json([
-    { id: "tp-2", fullName: "Mary Wambui", admissionNo: "KNPSS/DEEE/2022/9104", companyName: "Athee River Cement Works", missingCount: 4 }
-  ]);
+  res.json([{ id: 'tp-2', fullName: 'Mary Wambui', admissionNo: 'KNPSS/DEEE/2022/9104', companyName: 'Athee River Cement Works', missingCount: 4 }]);
 });
 
-app.get('/api/v1/analytics/officer-performance', (req, res) => {
-  res.json([
-    { name: "Mary Wanjiku", assignedCount: db.placements.filter(p => p.assignedOfficerId === "u-officer-1").length, verifiedCount: db.assessments.length, pendingReviews: db.logbookEntries.filter(le => le.status === 'SUBMITTED').length }
-  ]);
-});
-
-app.get('/api/v1/analytics/document-report', (req, res) => {
-  res.json(db.documents.map(d => ({
-    title: d.title,
-    policy: d.downloadPolicy,
-    downloads: db.downloadEvents.filter(e => e.documentId === d.id).length
-  })));
-});
-
-
-// 9.10 Audit
-app.get('/api/v1/audit', (req, res) => {
-  res.json(db.auditLogs);
-});
-
-
-// 9.11 USSD callback simulation
-app.post('/api/v1/ussd/callback', (req, res) => {
-  const { sessionId, phoneNumber, text } = req.body;
-  const phone = phoneNumber || "+254712345678";
-  
-  // Find trainee user
-  const user = db.users.find(u => u.phone === phone);
-  const tp = user ? db.traineeProfiles.find(t => t.userId === user.id) : null;
-  const pl = tp ? db.placements.find(p => p.traineeId === tp.id) : null;
-
-  if (!user || !tp) {
-    return res.send("END Trainee mobile number is not registered on KNPSS Link.");
-  }
-
-  const inputParts = text ? text.split('*') : [];
-  const level = inputParts.length;
-  const lastInput = inputParts[level - 1] || "";
-
-  if (!text || lastInput === "0") {
-    // Menu top level
-    let response = "CON Welcome to KNPSS Link\n";
-    response += "1. Check Logbook Status\n";
-    response += "2. View Missing Entries\n";
-    response += "3. My Placement Details\n";
-    response += "4. Contact My Officer\n";
-    response += "0. Exit";
-    return res.send(response);
-  }
-
-  const selection = inputParts[0];
-
-  if (selection === "1") {
-    // Logbook Status
-    if (!pl) return res.send("END No active placement recorded.");
-    const entries = db.logbookEntries.filter(le => le.placementId === pl.id);
-    const approved = entries.filter(le => le.status === 'APPROVED').length;
-    const pending = entries.filter(le => le.status === 'SUBMITTED').length;
-    let resp = `CON Logbook Progress: ${Math.round((approved/60)*100)}%\n`;
-    resp += `Approved: ${approved} | Pending: ${pending}\n`;
-    resp += "0. Back";
-    res.send(resp);
-  } else if (selection === "2") {
-    // Missing entries
-    let resp = "CON Missing dates (last 7 days):\n";
-    resp += "- 18 June 2026\n- 19 June 2026\n";
-    resp += "Upload via app when online.\n";
-    resp += "0. Back";
-    res.send(resp);
-  } else if (selection === "3") {
-    // Placement details
-    if (!pl) return res.send("CON No active placement.\n0. Back");
-    let resp = `CON Company: ${pl.companyName.substring(0, 20)}\n`;
-    resp += `Supervisor: ${pl.supervisorName || "N/A"}\n`;
-    resp += `Officer: Mary Wanjiku\n`;
-    resp += "0. Back";
-    res.send(resp);
-  } else if (selection === "4") {
-    // Contact details
-    const officer = pl && pl.assignedOfficerId ? db.users.find(u => u.id === pl.assignedOfficerId) : null;
-    let resp = `CON Assessor contact:\n`;
-    resp += `Name: ${officer ? officer.fullName : "Mary Wanjiku"}\n`;
-    resp += `Phone: ${officer ? officer.phone : "0799000111"}\n`;
-    resp += "0. Back";
-    res.send(resp);
-  } else {
-    res.send("END Thank you for visiting KNPSS Link.");
+app.get('/api/v1/analytics/officer-performance', async (req, res) => {
+  try {
+    const placements = await fetchAll('placements');
+    const assessments = await fetchAll('assessments');
+    const pendingReviews = (await fetchAll('logbook_entries')).filter((le: LogbookEntry) => le.status === 'SUBMITTED').length;
+    res.json([{ name: 'Mary Wanjiku', assignedCount: (placements as Placement[]).filter(p => p.assignedOfficerId === 'u-officer-1').length, verifiedCount: (assessments as Assessment[]).length, pendingReviews }]);
+  } catch (error: any) {
+    console.error('Get officer performance error:', error);
+    res.status(500).json({ error: 'Failed to fetch officer performance' });
   }
 });
 
-// Developer endpoints to review simulated SMS/USSD trigger history
-app.get('/api/v1/sms-logs', (req, res) => {
-  res.json(db.smsLogs);
-});
-
-// Developer system settings override
-app.get('/api/v1/system/settings', (req, res) => {
-  res.json(db.systemSettings);
-});
-
-app.post('/api/v1/system/settings', (req, res) => {
-  db.systemSettings = { ...db.systemSettings, ...req.body };
-  saveToDisk();
-  res.json(db.systemSettings);
-});
-
-// Daraja M-Pesa STK Push sandbox
-app.post('/api/v1/mpesa/stkpush', (req, res) => {
-  const { phone, userId } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
-  const attendee = db.users.find(u => u.id === userId);
-  const tp = attendee ? db.traineeProfiles.find(t => t.userId === attendee.id) : null;
-
-  if (tp) {
-    tp.feePaid = true;
-    saveToDisk();
-    logAudit(userId, "MPESA_DARAJA_PAYMENT_SUCCESS", "TRAINEE_PROFILE", tp.id, { feePaid: false }, { feePaid: true }, req.ip);
-    makeNotification(userId, "PAYMENT_SUCCESS", "M-Pesa STK Push Successful", `KSH ${db.systemSettings.feeAmount} attachment fee received via STK push. Receipt: LHX382K19J`, "PROFILE", tp.id);
-    sendSMS(phone || attendee?.phone || "+254712345678", `KNPSS Link: Confirmed KES ${db.systemSettings.feeAmount}.00 paid via M-Pesa. Receipt: LHX382K19J. Status marked as ELIGIBLE.`);
+app.get('/api/v1/analytics/document-report', async (req, res) => {
+  try {
+    const documents = await fetchAll('institutional_documents');
+    const downloadEvents = await fetchAll('download_events');
+    res.json((documents as InstitutionalDocument[]).map(d => ({ title: d.title, policy: d.downloadPolicy, downloads: (downloadEvents as DownloadEvent[]).filter(e => e.documentId === d.id).length })));
+  } catch (error: any) {
+    console.error('Get document report error:', error);
+    res.status(500).json({ error: 'Failed to fetch document report' });
   }
-
-  res.json({
-    status: "success",
-    detail: " Daraja API Callback successfully resolved. Account registered paid successfully.",
-    transactionId: "LHX382K19J",
-    amount: db.systemSettings.feeAmount
-  });
 });
 
-
-// Serve static files / Vite middleware in full stack
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa'
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*all', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+app.get('/api/v1/audit', async (req, res) => {
+  try {
+    const auditLogs = await fetchAll('audit_logs');
+    res.json(auditLogs);
+  } catch (error: any) {
+    console.error('Get audit logs error:', error);
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
   }
+});
 
-  app.listen(PORT, "0.0.0.0", () => {
+app.post('/api/v1/ussd/callback', async (req, res) => {
+  try {
+    const { sessionId, phoneNumber, text } = req.body;
+    const phone = phoneNumber || '+254712345678';
+    const user = await fetchOne('users', { phone });
+    const tp = user ? await fetchOne('trainee_profiles', { user_id: user.id }) : null;
+    const pl = tp ? await fetchOne('placements', { trainee_id: tp.id }) : null;
+    if (!user || !tp) {
+      return res.send('END Trainee mobile number is not registered on KNPSS Link.');
+    }
+    const inputParts = text ? String(text).split('*') : [];
+    const lastInput = inputParts[inputParts.length - 1] || '';
+    if (!text || lastInput === '0') {
+      let response = 'CON Welcome to KNPSS Link\n';
+      response += '1. Check Logbook Status\n';
+      response += '2. View Missing Entries\n';
+      response += '3. My Placement Details\n';
+      response += '4. Contact My Officer\n';
+      response += '0. Exit';
+      return res.send(response);
+    }
+    const selection = inputParts[0];
+    if (selection === '1') {
+      if (!pl) return res.send('END No active placement recorded.');
+      const entries = await fetchAllWhere('logbook_entries', { placement_id: pl.id });
+      const approved = (entries as LogbookEntry[]).filter(le => le.status === 'APPROVED').length;
+      const pending = (entries as LogbookEntry[]).filter(le => le.status === 'SUBMITTED').length;
+      let resp = `CON Logbook Progress: ${Math.round((approved / 60) * 100)}%\n`;
+      resp += `Approved: ${approved} | Pending: ${pending}\n`;
+      resp += '0. Back';
+      return res.send(resp);
+    } else if (selection === '2') {
+      let resp = 'CON Missing dates (last 7 days):\n';
+      resp += '- 18 June 2026\n- 19 June 2026\n';
+      resp += 'Upload via app when online.\n';
+      resp += '0. Back';
+      return res.send(resp);
+    } else if (selection === '3') {
+      if (!pl) return res.send('CON No active placement.\n0. Back');
+      let resp = `CON Company: ${pl.companyName.substring(0, 20)}\n`;
+      resp += `Supervisor: ${pl.supervisorName || 'N/A'}\n`;
+      resp += 'Officer: Mary Wanjiku\n';
+      resp += '0. Back';
+      return res.send(resp);
+    } else if (selection === '4') {
+      const officer = pl && pl.assignedOfficerId ? await fetchOne('users', { id: pl.assignedOfficerId }) : null;
+      let resp = 'CON Assessor contact:\n';
+      resp += `Name: ${officer ? officer.fullName : 'Mary Wanjiku'}\n`;
+      resp += `Phone: ${officer ? officer.phone : '0799000111'}\n`;
+      resp += '0. Back';
+      return res.send(resp);
+    }
+    res.send('END Thank you for visiting KNPSS Link.');
+  } catch (error: any) {
+    console.error('USSD callback error:', error);
+    res.status(500).send('END An error occurred. Please try again later.');
+  }
+});
+
+app.get('/api/v1/sms-logs', async (req, res) => {
+  try {
+    const logs = await fetchAll('sms_logs');
+    res.json(logs);
+  } catch (error: any) {
+    console.error('Get sms logs error:', error);
+    res.status(500).json({ error: 'Failed to fetch sms logs' });
+  }
+});
+
+app.get('/api/v1/system/settings', async (req, res) => {
+  try {
+    const settings = await getSystemSettings();
+    res.json(settings);
+  } catch (error: any) {
+    console.error('Get system settings error:', error);
+    res.status(500).json({ error: 'Failed to fetch system settings' });
+  }
+});
+
+app.post('/api/v1/system/settings', async (req, res) => {
+  try {
+    const existing = await fetchOne('settings', { id: 'default' });
+    let updated;
+    if (existing) {
+      updated = await updateRow('settings', { ...req.body, updatedAt: new Date().toISOString() }, { id: 'default' });
+    } else {
+      updated = await insertRow('settings', { id: 'default', ...req.body, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    }
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Post system settings error:', error);
+    res.status(500).json({ error: 'Failed to update system settings' });
+  }
+});
+
+app.post('/api/v1/mpesa/stkpush', async (req, res) => {
+  try {
+    const { phone, userId } = req.get('content-type')?.includes('application/json') ? req.body : req.query;
+    const attendee = await fetchOne('users', { id: userId });
+    const tp = attendee ? await fetchOne('trainee_profiles', { user_id: attendee.id }) : null;
+    if (tp) {
+      await updateRow('trainee_profiles', { feePaid: true }, { id: tp.id });
+      await logAudit(userId, 'MPESA_DARAJA_PAYMENT_SUCCESS', 'TRAINEE_PROFILE', tp.id, { feePaid: false }, { feePaid: true }, req.ip);
+      await makeNotification(userId, 'PAYMENT_SUCCESS', 'M-Pesa STK Push Successful', `KSH ${(await getSystemSettings()).feeAmount} attachment fee received via STK push. Receipt: LHX382K19J`, 'PROFILE', tp.id);
+      await sendSMS(phone || attendee?.phone || '+254712345678', `KNPSS Link: Confirmed KES ${(await getSystemSettings()).feeAmount}.00 paid via M-Pesa. Receipt: LHX382K19J. Status marked as ELIGIBLE.`);
+    }
+    res.json({ status: 'success', detail: ' Daraja API Callback successfully resolved. Account registered paid successfully.', transactionId: 'LHX382K19J', amount: (await getSystemSettings()).feeAmount });
+  } catch (error: any) {
+    console.error('MPESA STK Push error:', error);
+    res.status(500).json({ error: 'Failed to process Daraja callback' });
+  }
+});
+
+if (process.env.VERCEL !== '1' && process.env.VERCEL !== 'true') {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`[KNPSS Link Applet Running on http://localhost:${PORT}]`);
   });
 }
 
 export { app };
-
-if (!isVercel) {
-  startServer();
-}
