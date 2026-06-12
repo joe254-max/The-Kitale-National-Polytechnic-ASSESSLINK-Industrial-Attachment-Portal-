@@ -1,4 +1,5 @@
-import serverless from 'serverless-http';
+import * as serverless from 'serverless-http';
 import { app } from '../server';
 
-export default serverless(app);
+const handler = ((serverless as any).default || serverless)(app);
+export default handler;

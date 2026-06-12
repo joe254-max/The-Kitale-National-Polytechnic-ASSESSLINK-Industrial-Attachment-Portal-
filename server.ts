@@ -5,18 +5,15 @@
 
 import dotenv from 'dotenv';
 import express from 'express';
-import path from 'path';
-import os from 'os';
-import fs from 'fs';
 import crypto from 'crypto';
-import { createServer as createViteServer } from 'vite';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { Resend } from 'resend';
+import { supabase } from './lib/supabase';
 
 // Load environment variables
-const envResult = dotenv.config({ path: path.join(process.cwd(), '.env.local') });
-if (envResult.error) {
-  console.warn('Warning: .env.local file not loaded:', envResult.error);
-}
+dotenv.config({ path: './.env.local' });
 
 import { 
   User, TraineeProfile, OfficerProfile, SupervisorProfile, AdminProfile,
@@ -26,77 +23,212 @@ import {
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
-const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
-const DATA_DIR = isVercel ? path.join(os.tmpdir(), 'knpss_data') : path.join(process.cwd(), 'data');
-const UPLOADS_DIR = isVercel ? path.join(os.tmpdir(), 'uploads') : path.join(process.cwd(), 'uploads');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-const SEED_DB_FILE = path.join(process.cwd(), 'data', 'db.json');
-
-// Initialize Resend client
-const resend = new Resend(process.env.RESEND_API_KEY);
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+let resend: any;
+if (RESEND_API_KEY) {
+  resend = new Resend(RESEND_API_KEY);
+} else {
+  resend = { emails: { send: async () => ({ id: 'stub', status: 'queued' }) } };
+}
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+const SUPABASE_RESET_PASSWORD_REDIRECT_URL = process.env.SUPABASE_RESET_PASSWORD_REDIRECT_URL || process.env.APP_URL || 'http://localhost:4173';
 
-// OTP Store: Map of email -> { code, expiresAt }
-const otpStore = new Map<string, { code: string; expiresAt: number }>();
+const DATA_DIR = process.env.DATA_DIR || path.join(os.tmpdir(), 'assesslink-data');
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
+const DB_FILE = path.join(DATA_DIR, 'db.json');
+const SEED_DB_FILE = path.join(DATA_DIR, 'seed-db.json');
 
-// Reset Token Store: Map of resetToken -> { email, expiresAt }
-const resetTokenStore = new Map<string, { email: string; expiresAt: number }>();
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-// Clean up expired OTPs every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [email, otp] of otpStore.entries()) {
-    if (otp.expiresAt < now) {
-      otpStore.delete(email);
-    }
-  }
-  // Clean up expired reset tokens
-  for (const [token, data] of resetTokenStore.entries()) {
-    if (data.expiresAt < now) {
-      resetTokenStore.delete(token);
-    }
-  }
-}, 5 * 60 * 1000);
-
-// Ensure data folder exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-// Ensure uploads folder exists
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-
-// Global In-Memory Store synced with DB_FILE
-let db = {
-  users: [] as User[],
-  traineeProfiles: [] as TraineeProfile[],
-  officerProfiles: [] as OfficerProfile[],
-  supervisorProfiles: [] as SupervisorProfile[],
-  adminProfiles: [] as AdminProfile[],
-  placements: [] as Placement[],
-  logbookEntries: [] as LogbookEntry[],
-  assessments: [] as Assessment[],
-  documents: [] as InstitutionalDocument[],
-  documentEntitlements: [] as DocumentEntitlement[],
-  downloadEvents: [] as DownloadEvent[],
-  notifications: [] as AppNotification[],
-  auditLogs: [] as AuditLog[],
-  smsLogs: [] as SMSLog[],
-  attendanceRecords: [] as AttendanceRecord[],
+let db: any = {
+  users: [],
+  traineeProfiles: [],
+  officerProfiles: [],
+  supervisorProfiles: [],
+  adminProfiles: [],
+  placements: [],
+  logbookEntries: [],
+  assessments: [],
+  documents: [],
+  documentEntitlements: [],
+  downloadEvents: [],
+  notifications: [],
+  auditLogs: [],
+  smsLogs: [],
+  attendanceRecords: [],
   systemSettings: {
-    institutionName: "Kenya National Polytechnic & Vocational Sciences",
+    institutionName: 'Kenya National Polytechnic & Vocational Sciences',
     attachmentDurationWeeks: 12,
     lateWindowHours: 48,
-    smsApiKey: "at_key_8f97b001a2f3",
-    smsUsername: "knpss_attachment",
-    smsSenderId: "KNPSS_LINK",
+    smsApiKey: 'at_key_8f97b001a2f3',
+    smsUsername: 'knpss_attachment',
+    smsSenderId: 'KNPSS_LINK',
     feeCollectionEnabled: true,
-    feeAmount: 1500, // KES
+    feeAmount: 1500,
     force2FA: false
   }
 };
+
+const otpStore = new Map<string, { code: string; expiresAt: number }>();
+const resetTokenStore = new Map<string, { email: string; expiresAt: number }>();
+
+// No-op persistence shim: runtime persistence moved to Supabase
+function saveToDisk() {
+  // Intentionally empty on serverless; Supabase handles persistence.
+}
+
+// Populate in-memory seed data for local development if no users exist
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY && (!db.users || db.users.length === 0)) {
+  try {
+    seedDatabase();
+    console.log('Seeded in-memory demo users for local dev');
+  } catch (e) {
+    console.error('Failed to seed in-memory DB:', e);
+  }
+}
+
+function toSnakeCase(value: any): any {
+  if (Array.isArray(value)) return value.map(toSnakeCase);
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return Object.entries(value).reduce((acc, [key, val]) => {
+      const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      acc[snakeKey] = toSnakeCase(val);
+      return acc;
+    }, {} as any);
+  }
+  return value;
+}
+
+function toCamelCase(value: any): any {
+  if (Array.isArray(value)) return value.map(toCamelCase);
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return Object.entries(value).reduce((acc, [key, val]) => {
+      const camelKey = key.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+      acc[camelKey] = toCamelCase(val);
+      return acc;
+    }, {} as any);
+  }
+  return value;
+}
+
+async function fetchOne(table: string, filters: Record<string, any>) {
+  let query = supabase.from(table).select('*');
+  for (const [column, value] of Object.entries(filters)) {
+    if (typeof value === 'string' && column === 'email') {
+      query = query.ilike(column, value.toLowerCase());
+    } else {
+      query = query.eq(column, value);
+    }
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return toCamelCase(data);
+}
+
+async function fetchAll(table: string, queryBuilder?: (builder: any) => any) {
+  let query = supabase.from(table).select('*');
+  if (queryBuilder) query = queryBuilder(query);
+  const { data, error } = await query;
+  if (error) throw error;
+  return toCamelCase(data || []);
+}
+
+async function insertRow(table: string, row: any) {
+  const { data, error } = await supabase.from(table).insert(toSnakeCase(row)).select();
+  if (error) throw error;
+  return toCamelCase(data?.[0]);
+}
+
+async function insertRows(table: string, rows: any[]) {
+  const { data, error } = await supabase.from(table).insert(rows.map(toSnakeCase)).select();
+  if (error) throw error;
+  return toCamelCase(data || []);
+}
+
+async function updateRow(table: string, updates: any, match: Record<string, any>) {
+  let query = supabase.from(table).update(toSnakeCase(updates)).select();
+  for (const [key, value] of Object.entries(match)) {
+    query = query.eq(key, value);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return toCamelCase(data);
+}
+
+async function updateRows(table: string, updates: any, match: Record<string, any>) {
+  let query = supabase.from(table).update(toSnakeCase(updates)).select();
+  for (const [key, value] of Object.entries(match)) {
+    query = query.eq(key, value);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return toCamelCase(data || []);
+}
+
+async function getSystemSettings() {
+  const { data, error } = await supabase.from('settings').select('*').eq('id', 'default').maybeSingle();
+  if (error || !data) {
+    console.error('Failed to fetch system settings:', error);
+    return {
+      institutionName: 'Kenya National Polytechnic & Vocational Sciences',
+      attachmentDurationWeeks: 12,
+      lateWindowHours: 48,
+      smsApiKey: 'at_key_8f97b001a2f3',
+      smsUsername: 'knpss_attachment',
+      smsSenderId: 'KNPSS_LINK',
+      feeCollectionEnabled: true,
+      feeAmount: 1500,
+      force2FA: false
+    };
+  }
+  return toCamelCase(data);
+}
+
+function hashPassword(password: string) {
+  return crypto.createHash('sha256').update(String(password)).digest('hex');
+}
+
+async function logAudit(userId: string | undefined, action: string, type?: string, id?: string, oldVals?: any, newVals?: any, ip: string = '127.0.0.1') {
+  await insertRow('audit_logs', {
+    id: `al-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    action,
+    entityType: type,
+    entityId: id,
+    oldValues: oldVals ? JSON.stringify(oldVals) : undefined,
+    newValues: newVals ? JSON.stringify(newVals) : undefined,
+    ipAddress: ip,
+    createdAt: new Date().toISOString()
+  });
+}
+
+async function makeNotification(userId: string, type: string, title: string, body: string, entType?: string, entId?: string) {
+  await insertRow('app_notifications', {
+    id: `not-${Math.random().toString(36).substr(2, 9)}`,
+    userId,
+    type,
+    title,
+    body,
+    isRead: false,
+    relatedEntityType: entType,
+    relatedEntityId: entId,
+    createdAt: new Date().toISOString()
+  });
+}
+
+async function sendSMS(phoneNumber: string, message: string) {
+  const settings = await getSystemSettings();
+  await insertRow('sms_logs', {
+    id: `sms-${Math.random().toString(36).substr(2, 9)}`,
+    phoneNumber,
+    message,
+    senderId: settings.smsSenderId,
+    status: 'SENT',
+    createdAt: new Date().toISOString()
+  });
+  console.log(`[SMS SIMULATION] To: ${phoneNumber} | From: ${settings.smsSenderId} | Content: "${message}"`);
+}
 
 // Seed Helper
 function seedDatabase() {
@@ -676,112 +808,21 @@ function seedDatabase() {
     }
   ];
 
-  db = {
-    users,
-    traineeProfiles,
-    officerProfiles,
-    supervisorProfiles,
-    adminProfiles,
-    placements,
-    logbookEntries,
-    assessments,
-    documents,
-    documentEntitlements,
-    downloadEvents: [],
-    notifications,
-    auditLogs,
-    smsLogs,
-    attendanceRecords,
-    systemSettings: db.systemSettings
-  };
-
   saveToDisk();
 }
-
-// Save & Load DB to JSON
-function saveToDisk() {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
-}
-
-function hashPassword(password: string) {
-  return crypto.createHash('sha256').update(String(password)).digest('hex');
-}
-
-function loadFromDisk() {
-  if (fs.existsSync(DB_FILE)) {
-    try {
-      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-    } catch (e) {
-      console.error("Failed to parse db.json, generating seeds...", e);
-      seedDatabase();
-    }
-  } else if (fs.existsSync(SEED_DB_FILE)) {
-    try {
-      fs.copyFileSync(SEED_DB_FILE, DB_FILE);
-      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-    } catch (e) {
-      console.error("Failed to copy seed db.json into writable data directory:", e);
-      seedDatabase();
-    }
-  } else {
-    seedDatabase();
-  }
-}
-
-// Initial Load
-loadFromDisk();
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Helper to write to Audit Trail
-function logAudit(userId: string | undefined, action: string, type?: string, id?: string, oldVals?: any, newVals?: any, ip: string = "127.0.0.1") {
-  const log: AuditLog = {
-    id: `al-${Math.random().toString(36).substr(2, 9)}`,
-    userId,
-    action,
-    entityType: type,
-    entityId: id,
-    oldValues: oldVals ? JSON.stringify(oldVals) : undefined,
-    newValues: newVals ? JSON.stringify(newVals) : undefined,
-    ipAddress: ip,
-    createdAt: new Date().toISOString()
-  };
-  db.auditLogs.unshift(log); // newest first
-  saveToDisk();
-}
+// Serve built React frontend from dist/
+app.use(express.static(path.join(process.cwd(), 'dist'), { index: false }));
 
-// Helper to push in-app Notifications
-function makeNotification(userId: string, type: string, title: string, body: string, entType?: string, entId?: string) {
-  const notification: AppNotification = {
-    id: `not-${Math.random().toString(36).substr(2, 9)}`,
-    userId,
-    type,
-    title,
-    body,
-    isRead: false,
-    relatedEntityType: entType,
-    relatedEntityId: entId,
-    createdAt: new Date().toISOString()
-  };
-  db.notifications.unshift(notification);
-  saveToDisk();
-}
+// SPA fallback: serve index.html for all non-API routes
+app.get('/', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'dist', 'index.html'));
+});
 
-// Helper to trigger SMS simulations
-async function sendSMS(phoneNumber: string, message: string) {
-  const log: SMSLog = {
-    id: `sms-${Math.random().toString(36).substr(2, 9)}`,
-    phoneNumber,
-    message,
-    senderId: db.systemSettings.smsSenderId,
-    status: "SENT",
-    createdAt: new Date().toISOString()
-  };
-  db.smsLogs.unshift(log);
-  saveToDisk();
-  console.log(`[SMS SIMULATION] To: ${phoneNumber} | From: ${db.systemSettings.smsSenderId} | Content: "${message}"`);
-}
+// Legacy in-memory notification/SMS helpers removed — use Supabase-backed helpers above.
 
 
 // --- API ROUTES ---
@@ -1056,25 +1097,50 @@ app.post('/api/v1/auth/verify-otp', (req, res) => {
 });
 
 app.post('/api/v1/auth/forgot-password', async (req, res) => {
-  const { email } = req.body;
-  const user = db.users.find(u => u.email.toLowerCase() === email?.toLowerCase());
-  if (!user) {
-    return res.status(404).json({ title: "Not Found", detail: "Email not discovered" });
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ title: "Bad Request", detail: "Email is required" });
+    }
+
+    const emailLower = email.toLowerCase();
+    const user = db.users.find(u => u.email.toLowerCase() === emailLower);
+    if (!user) {
+      return res.status(404).json({ title: "Not Found", detail: "Email not discovered" });
+    }
+
+    if (supabase) {
+      const { data, error } = await supabase.auth.resetPasswordForEmail(emailLower, {
+        redirectTo: SUPABASE_RESET_PASSWORD_REDIRECT_URL
+      });
+
+      if (error) {
+        console.error('Supabase forgot-password error:', error);
+        return res.status(500).json({ title: 'Email Error', detail: 'Failed to send Supabase password reset email.' });
+      }
+
+      logAudit(user.id, "PASSWORD_RESET_EMAIL_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
+      return res.json({
+        message: "Password reset email sent via Supabase. Check your inbox.",
+        mode: "supabase-reset",
+        email: emailLower
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+    otpStore.set(emailLower, { code: otp, expiresAt });
+
+    if (user.phone) {
+      await sendSMS(user.phone, `Your KNPSS Link password reset code is ${otp}. Expires in 10 minutes. Do not share.`);
+    }
+
+    logAudit(user.id, "PASSWORD_RESET_OTP_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
+    res.json({ message: "OTP sent to your email and phone number.", mode: "otp", simulatedOtp: otp });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ title: "Server Error", detail: "Failed to process password reset request" });
   }
-
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  // Store OTP with 10-minute expiry
-  const expiresAt = Date.now() + 10 * 60 * 1000;
-  otpStore.set(email.toLowerCase(), { code: otp, expiresAt });
-  
-  // Simulate dispatching via Email + Africa's Talking
-  if (user.phone) {
-    await sendSMS(user.phone, `Your KNPSS Link password reset code is ${otp}. Expires in 10 minutes. Do not share.`);
-  }
-
-  logAudit(user.id, "PASSWORD_RESET_OTP_TRIGGERED", "USER", user.id, undefined, undefined, req.ip);
-
-  res.json({ message: "OTP sent to your email and phone number.", simulatedOtp: otp });
 });
 
 app.post('/api/v1/auth/reset-password', (req, res) => {
@@ -2290,29 +2356,11 @@ app.post('/api/v1/mpesa/stkpush', (req, res) => {
 });
 
 
-// Serve static files / Vite middleware in full stack
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa'
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*all', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[KNPSS Link Applet Running on http://localhost:${PORT}]`);
-  });
-}
-
 export { app };
 
-if (!isVercel) {
-  startServer();
+// Start standalone server in development for local demo only.
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[KNPSS Link (dev) running on http://localhost:${PORT}]`);
+  });
 }
