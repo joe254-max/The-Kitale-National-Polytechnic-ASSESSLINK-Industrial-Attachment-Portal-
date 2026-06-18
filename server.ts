@@ -12,10 +12,12 @@ import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { Resend } from 'resend';
 
-// Load environment variables
-const envResult = dotenv.config({ path: path.join(process.cwd(), '.env.local') });
-if (envResult.error) {
-  console.warn('Warning: .env.local file not loaded:', envResult.error);
+// Load environment variables only if the file exists so local startup doesn't print noisy warnings.
+const envLocalPath = path.join(process.cwd(), '.env.local');
+if (fs.existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+} else {
+  dotenv.config();
 }
 
 import { 
@@ -32,8 +34,9 @@ const UPLOADS_DIR = isVercel ? path.join(os.tmpdir(), 'uploads') : path.join(pro
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const SEED_DB_FILE = path.join(process.cwd(), 'data', 'db.json');
 
-// Initialize Resend client
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Initialize Resend client only when the API key is actually available.
+const resendApiKey = process.env.RESEND_API_KEY?.trim();
+const resend = resendApiKey ? new Resend(resendApiKey) : null;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
 // OTP Store: Map of email -> { code, expiresAt }
@@ -970,8 +973,8 @@ app.post('/api/v1/auth/send-otp', async (req, res) => {
     const expiresAt = Date.now() + 10 * 60 * 1000;
     otpStore.set(emailLower, { code: otp, expiresAt });
     
-    // Send via Resend
-    if (process.env.RESEND_API_KEY) {
+    // Send via Resend only when configured; otherwise fall back to a local/dev response.
+    if (resend && resendApiKey) {
       try {
         const resendResult = await resend.emails.send({
           from: RESEND_FROM_EMAIL,
@@ -994,12 +997,12 @@ app.post('/api/v1/auth/send-otp', async (req, res) => {
         console.error('Resend send-otp error:', emailError);
         return res.status(500).json({ title: 'Email Error', detail: 'Failed to send OTP email. Please check your Resend settings.' });
       }
-    } else {
-      return res.status(500).json({ title: 'Email Config Error', detail: 'RESEND_API_KEY not configured.' });
     }
     
     res.json({ 
-      message: "OTP sent to your email.",
+      message: resend && resendApiKey
+        ? "OTP sent to your email."
+        : "OTP generated successfully. Email delivery is disabled in this environment.",
       email: emailLower,
       expiresIn: 600, // seconds
       otp: otp // included for dev debugging
