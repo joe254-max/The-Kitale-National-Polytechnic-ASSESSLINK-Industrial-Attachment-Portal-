@@ -1789,7 +1789,7 @@ export default function App() {
               )}
             </button>
           )}
-          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-white rounded-md flex items-center justify-center shrink-0 overflow-hidden border border-[#7B1C2E]/20 p-0.5">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-white rounded-md flex items-center justify-center shrink-0 overflow-hidden border border-[#7B1C2E]/20 p-1">
             <KnpLogo />
           </div>
           <div>
@@ -1954,7 +1954,7 @@ export default function App() {
           </div>
           <div className="w-full max-w-md bg-white border border-gray-200/80 rounded-2xl p-5 sm:p-6 shadow-2xl relative z-20 transition-all duration-500">
             <div className="flex flex-col items-center text-center mb-5 select-none">
-              <div className="w-14 h-14 bg-white border border-[#7B1C2E]/20 rounded-full flex items-center justify-center p-1.5 shadow-md mb-3 overflow-hidden">
+              <div className="w-20 h-20 bg-white border border-[#7B1C2E]/20 rounded-full flex items-center justify-center p-2 shadow-md mb-3 overflow-hidden">
                 <KnpLogo />
               </div>
               <h2 className="text-[13px] font-black uppercase tracking-wider text-[#7B1C2E] leading-tight text-center">

@@ -114,6 +114,20 @@
       "lastLoginAt": "2026-06-11T09:58:43.488Z",
       "createdAt": "2026-06-11T09:58:43.488Z",
       "updatedAt": "2026-06-11T09:58:43.488Z"
+    },
+    {
+      "id": "u-0mtnmhf4m",
+      "role": "TRAINEE",
+      "fullName": "Joseph Njiraini",
+      "email": "josephkurianjiraini1@gmail.com",
+      "passwordHash": "b2c639cfc6ff48d7bb86940e1563fa21f2b455523d2d2f2fd906707f1ed79b88",
+      "phone": "+254727463389",
+      "profilePhotoUrl": "blob:https://redesigned-couscous-5g44rrr49xwq24q46-3001.app.github.dev/6781db02-09e8-4de3-b676-03ee5c95fae2",
+      "isActive": true,
+      "isApprovedForLogin": true,
+      "lastLoginAt": "2026-06-18T12:32:19.955Z",
+      "createdAt": "2026-06-18T12:30:28.416Z",
+      "updatedAt": "2026-06-18T12:31:39.095Z"
     }
   ],
   "traineeProfiles": [
@@ -188,6 +202,18 @@
       "eligibilityStatus": "PENDING",
       "feePaid": false,
       "createdAt": "2026-06-11T09:58:43.488Z"
+    },
+    {
+      "id": "tp-vg75p35sb",
+      "userId": "u-0mtnmhf4m",
+      "admissionNo": "KNPSS/ADMIT/2026/5399",
+      "courseCode": "DICT",
+      "courseName": "Diploma in Information Communication Technology",
+      "cohort": "2024 Intake",
+      "attachmentDurationWeeks": 12,
+      "eligibilityStatus": "PENDING",
+      "feePaid": true,
+      "createdAt": "2026-06-18T12:30:28.416Z"
     }
   ],
   "officerProfiles": [
@@ -498,6 +524,17 @@
   "downloadEvents": [],
   "notifications": [
     {
+      "id": "not-9nzbpg3ad",
+      "userId": "u-0mtnmhf4m",
+      "type": "PAYMENT_SUCCESS",
+      "title": "M-Pesa STK Push Successful",
+      "body": "KSH 1500 attachment fee received via STK push. Receipt: LHX382K19J",
+      "isRead": false,
+      "relatedEntityType": "PROFILE",
+      "relatedEntityId": "tp-vg75p35sb",
+      "createdAt": "2026-06-18T12:30:59.843Z"
+    },
+    {
       "id": "not-1",
       "userId": "u-trainee-1",
       "type": "LOGBOOK_STATUS",
@@ -521,6 +558,47 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "al-rrw1e3knh",
+      "userId": "u-0mtnmhf4m",
+      "action": "USER_LOGIN",
+      "entityType": "USER",
+      "entityId": "u-0mtnmhf4m",
+      "ipAddress": "127.0.0.1",
+      "createdAt": "2026-06-18T12:32:19.955Z"
+    },
+    {
+      "id": "al-u48tsoudc",
+      "userId": "u-0mtnmhf4m",
+      "action": "USER_MODIFICATION",
+      "entityType": "USER",
+      "entityId": "u-0mtnmhf4m",
+      "oldValues": "{\"id\":\"u-0mtnmhf4m\",\"role\":\"TRAINEE\",\"fullName\":\"Joseph Njiraini\",\"email\":\"josephkurianjiraini1@gmail.com\",\"passwordHash\":\"b2c639cfc6ff48d7bb86940e1563fa21f2b455523d2d2f2fd906707f1ed79b88\",\"phone\":\"+254727463389\",\"profilePhotoUrl\":\"https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80\",\"isActive\":true,\"isApprovedForLogin\":true,\"lastLoginAt\":\"2026-06-18T12:30:28.416Z\",\"createdAt\":\"2026-06-18T12:30:28.416Z\",\"updatedAt\":\"2026-06-18T12:30:28.416Z\"}",
+      "newValues": "{\"id\":\"u-0mtnmhf4m\",\"role\":\"TRAINEE\",\"fullName\":\"Joseph Njiraini\",\"email\":\"josephkurianjiraini1@gmail.com\",\"passwordHash\":\"b2c639cfc6ff48d7bb86940e1563fa21f2b455523d2d2f2fd906707f1ed79b88\",\"phone\":\"+254727463389\",\"profilePhotoUrl\":\"blob:https://redesigned-couscous-5g44rrr49xwq24q46-3001.app.github.dev/6781db02-09e8-4de3-b676-03ee5c95fae2\",\"isActive\":true,\"isApprovedForLogin\":true,\"lastLoginAt\":\"2026-06-18T12:30:28.416Z\",\"createdAt\":\"2026-06-18T12:30:28.416Z\",\"updatedAt\":\"2026-06-18T12:31:39.095Z\"}",
+      "ipAddress": "127.0.0.1",
+      "createdAt": "2026-06-18T12:31:39.095Z"
+    },
+    {
+      "id": "al-n6rc7ogai",
+      "userId": "u-0mtnmhf4m",
+      "action": "MPESA_DARAJA_PAYMENT_SUCCESS",
+      "entityType": "TRAINEE_PROFILE",
+      "entityId": "tp-vg75p35sb",
+      "oldValues": "{\"feePaid\":false}",
+      "newValues": "{\"feePaid\":true}",
+      "ipAddress": "127.0.0.1",
+      "createdAt": "2026-06-18T12:30:59.841Z"
+    },
+    {
+      "id": "al-42cgo0mjh",
+      "userId": "u-0mtnmhf4m",
+      "action": "USER_SIGNUP",
+      "entityType": "USER",
+      "entityId": "u-0mtnmhf4m",
+      "newValues": "{\"id\":\"u-0mtnmhf4m\",\"role\":\"TRAINEE\",\"fullName\":\"Joseph Njiraini\",\"email\":\"josephkurianjiraini1@gmail.com\",\"passwordHash\":\"b2c639cfc6ff48d7bb86940e1563fa21f2b455523d2d2f2fd906707f1ed79b88\",\"phone\":\"+254727463389\",\"profilePhotoUrl\":\"https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80\",\"isActive\":true,\"isApprovedForLogin\":true,\"lastLoginAt\":\"2026-06-18T12:30:28.416Z\",\"createdAt\":\"2026-06-18T12:30:28.416Z\",\"updatedAt\":\"2026-06-18T12:30:28.416Z\"}",
+      "ipAddress": "127.0.0.1",
+      "createdAt": "2026-06-18T12:30:28.417Z"
+    },
     {
       "id": "al-igfmv50vk",
       "userId": "u-5p7gsqwnx",
@@ -752,7 +830,16 @@
       "createdAt": "2026-05-11T12:18:18.399Z"
     }
   ],
-  "smsLogs": [],
+  "smsLogs": [
+    {
+      "id": "sms-1w83400ot",
+      "phoneNumber": "254712345678",
+      "message": "KNPSS Link: Confirmed KES 1500.00 paid via M-Pesa. Receipt: LHX382K19J. Status marked as ELIGIBLE.",
+      "senderId": "KNPSS_LINK",
+      "status": "SENT",
+      "createdAt": "2026-06-18T12:30:59.843Z"
+    }
+  ],
   "attendanceRecords": [
     {
       "id": "att-1",

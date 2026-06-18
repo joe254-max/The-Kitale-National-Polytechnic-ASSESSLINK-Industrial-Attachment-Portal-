@@ -27,12 +27,44 @@ import {
 } from './src/types';
 
 const app = express();
-const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+const DEFAULT_PORT = 3000;
+const PORT = process.env.PORT ? Number(process.env.PORT) : DEFAULT_PORT;
+const MAX_PORT_FALLBACK_ATTEMPTS = 10;
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
 const DATA_DIR = isVercel ? path.join(os.tmpdir(), 'knpss_data') : path.join(process.cwd(), 'data');
 const UPLOADS_DIR = isVercel ? path.join(os.tmpdir(), 'uploads') : path.join(process.cwd(), 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const SEED_DB_FILE = path.join(process.cwd(), 'data', 'db.json');
+
+async function listenWithFallback(startPort: number, host: string) {
+  for (let attempt = 0; attempt < MAX_PORT_FALLBACK_ATTEMPTS; attempt += 1) {
+    const currentPort = startPort + attempt;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const server = app.listen(currentPort, host)
+          .once('listening', () => resolve())
+          .once('error', (err: NodeJS.ErrnoException) => {
+            server.close(() => {
+              if (err.code === 'EADDRINUSE') {
+                reject(err);
+              } else {
+                reject(err);
+              }
+            });
+          });
+      });
+      return currentPort;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+        throw err;
+      }
+    }
+  }
+
+  throw new Error(
+    `Could not bind to any port between ${startPort} and ${startPort + MAX_PORT_FALLBACK_ATTEMPTS - 1}.`
+  );
+}
 
 // Initialize Resend client only when the API key is actually available.
 const resendApiKey = process.env.RESEND_API_KEY?.trim();
@@ -2309,9 +2341,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[KNPSS Link Applet Running on http://localhost:${PORT}]`);
-  });
+  const host = '0.0.0.0';
+  const boundPort = await listenWithFallback(PORT, host);
+  console.log(`[KNPSS Link Applet Running on http://localhost:${boundPort}]`);
 }
 
 export { app };
