@@ -17,6 +17,9 @@ export interface User {
   passwordHash?: string;
   phone?: string;
   profilePhotoUrl?: string;
+  nationalId?: string;
+  dob?: string;
+  gender?: string;
   isActive: boolean;
   isApprovedForLogin?: boolean;
   lastLoginAt?: string;
