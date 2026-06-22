@@ -60,7 +60,7 @@ EXCEPTION WHEN duplicate_object THEN null; END $$;
 -- USERS  (mirrors Supabase Auth via auth_user_id; keep app-level table for
 -- profile/role data that Auth doesn't store)
 -- ============================================================================
-create table users (
+create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   auth_user_id uuid unique references auth.users(id) on delete cascade,
   role user_role not null,
@@ -74,13 +74,13 @@ create table users (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index idx_users_role on users(role);
-create index idx_users_email on users(lower(email));
+create index if not exists idx_users_role on users(role);
+create index if not exists idx_users_email on users(lower(email));
 
 -- ============================================================================
 -- ROLE PROFILES (1:1 with users)
 -- ============================================================================
-create table trainee_profiles (
+create table if not exists trainee_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references users(id) on delete cascade,
   admission_no text not null unique,
@@ -92,10 +92,10 @@ create table trainee_profiles (
   fee_paid boolean default false,
   created_at timestamptz not null default now()
 );
-create index idx_trainee_cohort on trainee_profiles(cohort);
-create index idx_trainee_course on trainee_profiles(course_code);
+create index if not exists idx_trainee_cohort on trainee_profiles(cohort);
+create index if not exists idx_trainee_course on trainee_profiles(course_code);
 
-create table officer_profiles (
+create table if not exists officer_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references users(id) on delete cascade,
   employee_no text not null unique,
@@ -107,9 +107,9 @@ create table officer_profiles (
   availability_status officer_availability not null default 'AVAILABLE',
   created_at timestamptz not null default now()
 );
-create index idx_officer_regions on officer_profiles using gin(assigned_regions);
+create index if not exists idx_officer_regions on officer_profiles using gin(assigned_regions);
 
-create table supervisor_profiles (
+create table if not exists supervisor_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references users(id) on delete cascade,
   company_name text not null,
@@ -122,9 +122,9 @@ create table supervisor_profiles (
   current_assigned_trainees_count int not null default 0,
   created_at timestamptz not null default now()
 );
-create index idx_supervisor_company on supervisor_profiles(company_name);
+create index if not exists idx_supervisor_company on supervisor_profiles(company_name);
 
-create table admin_profiles (
+create table if not exists admin_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references users(id) on delete cascade,
   admin_staff_code text not null unique,
@@ -138,7 +138,7 @@ create table admin_profiles (
 -- ============================================================================
 -- PLACEMENTS
 -- ============================================================================
-create table placements (
+create table if not exists placements (
   id uuid primary key default gen_random_uuid(),
   trainee_id uuid not null references trainee_profiles(id) on delete cascade,
   company_name text not null,
@@ -160,18 +160,18 @@ create table placements (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index idx_placements_trainee on placements(trainee_id);
-create index idx_placements_officer on placements(assigned_officer_id);
-create index idx_placements_supervisor on placements(supervisor_id);
-create index idx_placements_status on placements(status);
-create index idx_placements_county on placements(county);
+create index if not exists idx_placements_trainee on placements(trainee_id);
+create index if not exists idx_placements_officer on placements(assigned_officer_id);
+create index if not exists idx_placements_supervisor on placements(supervisor_id);
+create index if not exists idx_placements_status on placements(status);
+create index if not exists idx_placements_county on placements(county);
 -- geo lookups for the PlacementMap component (nearest-officer / region queries)
-create index idx_placements_geo on placements(location_lat, location_lng);
+create index if not exists idx_placements_geo on placements(location_lat, location_lng);
 
 -- ============================================================================
 -- LOGBOOK ENTRIES
 -- ============================================================================
-create table logbook_entries (
+create table if not exists logbook_entries (
   id uuid primary key default gen_random_uuid(),
   placement_id uuid not null references placements(id) on delete cascade,
   entry_date date not null,
@@ -196,14 +196,14 @@ create table logbook_entries (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index idx_logbook_placement on logbook_entries(placement_id);
-create index idx_logbook_status on logbook_entries(status);
-create index idx_logbook_week on logbook_entries(placement_id, week_number);
+create index if not exists idx_logbook_placement on logbook_entries(placement_id);
+create index if not exists idx_logbook_status on logbook_entries(status);
+create index if not exists idx_logbook_week on logbook_entries(placement_id, week_number);
 
 -- ============================================================================
 -- ASSESSMENTS (officer site visits)
 -- ============================================================================
-create table assessments (
+create table if not exists assessments (
   id uuid primary key default gen_random_uuid(),
   placement_id uuid not null references placements(id) on delete cascade,
   officer_id uuid not null references officer_profiles(id),
@@ -220,13 +220,13 @@ create table assessments (
   officer_signature_url text,
   created_at timestamptz not null default now()
 );
-create index idx_assessments_placement on assessments(placement_id);
-create index idx_assessments_officer on assessments(officer_id);
+create index if not exists idx_assessments_placement on assessments(placement_id);
+create index if not exists idx_assessments_officer on assessments(officer_id);
 
 -- ============================================================================
 -- ATTENDANCE
 -- ============================================================================
-create table attendance_records (
+create table if not exists attendance_records (
   id uuid primary key default gen_random_uuid(),
   placement_id uuid not null references placements(id) on delete cascade,
   trainee_id uuid not null references trainee_profiles(id) on delete cascade,
@@ -238,12 +238,12 @@ create table attendance_records (
   updated_at timestamptz not null default now(),
   unique (placement_id, date)
 );
-create index idx_attendance_trainee on attendance_records(trainee_id, date);
+create index if not exists idx_attendance_trainee on attendance_records(trainee_id, date);
 
 -- ============================================================================
 -- INSTITUTIONAL DOCUMENTS, ENTITLEMENTS, DOWNLOAD EVENTS
 -- ============================================================================
-create table institutional_documents (
+create table if not exists institutional_documents (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   category doc_category not null,
@@ -261,10 +261,10 @@ create table institutional_documents (
   validation_code text,
   created_at timestamptz not null default now()
 );
-create index idx_documents_category on institutional_documents(category);
-create index idx_documents_active on institutional_documents(is_active);
+create index if not exists idx_documents_category on institutional_documents(category);
+create index if not exists idx_documents_active on institutional_documents(is_active);
 
-create table document_entitlements (
+create table if not exists document_entitlements (
   id uuid primary key default gen_random_uuid(),
   document_id uuid not null references institutional_documents(id) on delete cascade,
   user_id uuid not null references users(id) on delete cascade,
@@ -275,7 +275,7 @@ create table document_entitlements (
   unique (document_id, user_id)
 );
 
-create table download_events (
+create table if not exists download_events (
   id uuid primary key default gen_random_uuid(),
   document_id uuid not null references institutional_documents(id) on delete cascade,
   user_id uuid not null references users(id),
@@ -285,13 +285,13 @@ create table download_events (
   success boolean not null default true,
   created_at timestamptz not null default now()
 );
-create index idx_downloads_document on download_events(document_id);
-create index idx_downloads_user on download_events(user_id);
+create index if not exists idx_downloads_document on download_events(document_id);
+create index if not exists idx_downloads_user on download_events(user_id);
 
 -- ============================================================================
 -- NOTIFICATIONS, AUDIT, SMS, USSD
 -- ============================================================================
-create table app_notifications (
+create table if not exists app_notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   type text not null,
@@ -302,9 +302,9 @@ create table app_notifications (
   related_entity_id uuid,
   created_at timestamptz not null default now()
 );
-create index idx_notifications_user on app_notifications(user_id, is_read);
+create index if not exists idx_notifications_user on app_notifications(user_id, is_read);
 
-create table audit_logs (
+create table if not exists audit_logs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references users(id),
   action text not null,
@@ -316,11 +316,11 @@ create table audit_logs (
   ip_address text,
   created_at timestamptz not null default now()
 );
-create index idx_audit_user on audit_logs(user_id);
-create index idx_audit_entity on audit_logs(entity_type, entity_id);
-create index idx_audit_created on audit_logs(created_at desc);
+create index if not exists idx_audit_user on audit_logs(user_id);
+create index if not exists idx_audit_entity on audit_logs(entity_type, entity_id);
+create index if not exists idx_audit_created on audit_logs(created_at desc);
 
-create table sms_logs (
+create table if not exists sms_logs (
   id uuid primary key default gen_random_uuid(),
   phone_number text not null,
   message text not null,
@@ -329,7 +329,7 @@ create table sms_logs (
   created_at timestamptz not null default now()
 );
 
-create table ussd_sessions (
+create table if not exists ussd_sessions (
   session_id text primary key,
   phone_number text not null,
   network_code text,
@@ -341,7 +341,7 @@ create table ussd_sessions (
 -- ============================================================================
 -- SYSTEM SETTINGS (single-row config table instead of a loose object)
 -- ============================================================================
-create table system_settings (
+create table if not exists system_settings (
   id boolean primary key default true check (id), -- enforces exactly one row
   institution_name text not null default 'Kenya National Polytechnic & Vocational Sciences',
   attachment_duration_weeks int not null default 12,
@@ -353,7 +353,7 @@ create table system_settings (
   force_2fa boolean not null default false,
   updated_at timestamptz not null default now()
 );
-insert into system_settings (id) values (true);
+insert into system_settings (id) values (true) on conflict (id) do nothing;
 
 -- ============================================================================
 -- updated_at auto-touch trigger (saves you from forgetting it in every route)
@@ -366,11 +366,18 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists trg_users_updated on users;
 create trigger trg_users_updated before update on users
   for each row execute function touch_updated_at();
+
+drop trigger if exists trg_placements_updated on placements;
 create trigger trg_placements_updated before update on placements
   for each row execute function touch_updated_at();
+
+drop trigger if exists trg_logbook_updated on logbook_entries;
 create trigger trg_logbook_updated before update on logbook_entries
   for each row execute function touch_updated_at();
+
+drop trigger if exists trg_attendance_updated on attendance_records;
 create trigger trg_attendance_updated before update on attendance_records
   for each row execute function touch_updated_at();
