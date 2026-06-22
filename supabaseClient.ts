@@ -10,6 +10,9 @@
  * NEVER import this file or expose SUPABASE_SERVICE_ROLE_KEY in any
  * frontend/browser code.
  */
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let cachedClient: SupabaseClient | null = null;

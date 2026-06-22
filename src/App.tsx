@@ -322,6 +322,7 @@ export default function App() {
   const [signUpEmail, setSignUpEmail] = useState<string>('');
   const [signUpPhone, setSignUpPhone] = useState<string>('');
   const [signUpRole, setSignUpRole] = useState<UserRole>('TRAINEE');
+  const [signUpAdmissionNo, setSignUpAdmissionNo] = useState<string>('');
   const [signUpPassword, setSignUpPassword] = useState<string>('');
   const [signUpConfirmPassword, setSignUpConfirmPassword] = useState<string>('');
   
@@ -814,10 +815,22 @@ export default function App() {
     e.preventDefault();
     setErrorMsg('');
     try {
+      const roleMap: Record<string, string> = {
+        STUDENT: 'TRAINEE',
+        ASSESSOR: 'OFFICER',
+        SUPERVISOR: 'SUPERVISOR',
+        ADMIN: 'ADMIN'
+      };
+      const requestedRole = roleMap[selectedRoleTab];
+
       const res = await fetch('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+        body: JSON.stringify({ 
+          email: loginEmail, 
+          password: loginPassword,
+          role: requestedRole
+        })
       });
       if (res.ok) {
         const data = await res.json();
@@ -858,7 +871,8 @@ export default function App() {
           email: signUpEmail, 
           phone: signUpPhone,
           role: signUpRole,
-          password: signUpPassword
+          password: signUpPassword,
+          admissionNo: signUpRole === 'TRAINEE' ? signUpAdmissionNo : undefined
         })
       });
       if (res.ok) {
@@ -870,6 +884,7 @@ export default function App() {
         setSignUpEmail('');
         setSignUpPhone('');
         setSignUpRole('TRAINEE');
+        setSignUpAdmissionNo('');
         setSignUpPassword('');
         setSignUpConfirmPassword('');
         setIsSignUp(false);
@@ -1842,17 +1857,17 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* INSTITUTIONAL EMAIL field */}
+                  {/* INSTITUTIONAL EMAIL OR ADMISSION NUMBER field */}
                   <div>
                     <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                      INSTITUTIONAL EMAIL
+                      {selectedRoleTab === 'STUDENT' ? 'INSTITUTIONAL EMAIL OR ADMISSION NUMBER' : 'INSTITUTIONAL EMAIL'}
                     </label>
                     <input 
-                      type="email" 
+                      type="text" 
                       value={loginEmail} 
                       onChange={(e) => setLoginEmail(e.target.value)}
                       className="w-full h-[52px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
-                      placeholder="name@polytechnic.ac.ke"
+                      placeholder={selectedRoleTab === 'STUDENT' ? "name@polytechnic.ac.ke or KNPSS/ADMIT/..." : "name@polytechnic.ac.ke"}
                       required
                     />
                   </div>
@@ -1954,6 +1969,40 @@ export default function App() {
                     </div>
                   )}
 
+
+                  {/* Role field */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                      SELECT SYSTEM ROLE
+                    </label>
+                    <select 
+                      value={signUpRole} 
+                      onChange={(e) => setSignUpRole(e.target.value as UserRole)}
+                      className="w-full h-[52px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
+                    >
+                      <option value="TRAINEE">Enrolled Trainee / Student</option>
+                      <option value="SUPERVISOR">Industry Host Supervisor</option>
+                      <option value="OFFICER">Assessment Dispatch Officer</option>
+                    </select>
+                  </div>
+
+                  {/* Dynamic Admission Number Field for Students */}
+                  {signUpRole === 'TRAINEE' && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                        ADMISSION NUMBER
+                      </label>
+                      <input 
+                        type="text" 
+                        value={signUpAdmissionNo} 
+                        onChange={(e) => setSignUpAdmissionNo(e.target.value)}
+                        className="w-full h-[52.5px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                        placeholder="e.g. KNPSS/DICT/2026/0045"
+                        required={signUpRole === 'TRAINEE'}
+                      />
+                    </div>
+                  )}
+
                   {/* Full Name field */}
                   <div>
                     <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -1997,22 +2046,6 @@ export default function App() {
                       placeholder="e.g. +254712345678"
                       required
                     />
-                  </div>
-
-                  {/* Role field */}
-                  <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                      SELECT SYSTEM ROLE
-                    </label>
-                    <select 
-                      value={signUpRole} 
-                      onChange={(e) => setSignUpRole(e.target.value as UserRole)}
-                      className="w-full h-[52px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
-                    >
-                      <option value="TRAINEE">Enrolled Trainee / Student</option>
-                      <option value="SUPERVISOR">Industry Host Supervisor</option>
-                      <option value="OFFICER">Assessment Dispatch Officer</option>
-                    </select>
                   </div>
 
                   {/* Password field */}

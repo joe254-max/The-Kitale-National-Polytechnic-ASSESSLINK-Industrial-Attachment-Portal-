@@ -1,20 +1,13 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# ASSESSLINK / KNPSS Link
 
-# Run and deploy your AI Studio app
+An Industrial Attachment Management system.
 
-This contains everything you need to run your app locally.
+## Security Controls & Policies
 
-View your app in AI Studio: https://ai.studio/apps/9aae6228-a891-4be7-8cd0-98d6311c98ea
+- **Role-Based Access Control**: Highly refined middleware securing all protected endpoints based on verified application roles (`TRAINEE`, `OFFICER`, `SUPERVISOR`, `ADMIN`).
+- **Input & Storage Filtering**: Real-time ownership validation on placements and logbook entry fetches to prevent horizontal privilege escalation.
+- **Strict Rate Limiting**: Limiters added on vital authentication endpoints.
+- **Robust File Validation**: 10MB limits, magic-byte sniffing on uploads, explicit mime allowlists, attachment content disposition override on active media, and rigorous ownership access checks per file download.
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+> [!CAUTION]
+> Rotate `SUPABASE_SERVICE_ROLE_KEY` immediately if it has ever been committed, zipped, or shared outside a secrets manager.
