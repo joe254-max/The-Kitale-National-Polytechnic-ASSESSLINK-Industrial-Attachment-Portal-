@@ -10,21 +10,39 @@
  * NEVER import this file or expose SUPABASE_SERVICE_ROLE_KEY in any
  * frontend/browser code.
  */
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let cachedClient: SupabaseClient | null = null;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error(
-    'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables. ' +
-    'There is no fallback store anymore (the old db.json file is gone) — set these ' +
-    'in your .env locally, or in Render/Railway environment settings in production.'
-  );
+function getSupabaseClient(): SupabaseClient {
+  if (!cachedClient) {
+    const clean = (val: string | undefined) => val ? val.replace(/^["']|["']$/g, '').trim() : '';
+    const url = clean(process.env.SUPABASE_URL);
+    const key = clean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+    if (!url || !key) {
+      throw new Error(
+        'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables. ' +
+        'Please configure your Supabase credentials (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY) ' +
+        'in the AI Studio Settings (Secrets) panel to connect to your database.'
+      );
+    }
+    cachedClient = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
+  return cachedClient;
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
+// Export a proxy that behaves exactly like the Supabase client but loads/initializes it lazily
+export const supabase = new Proxy({} as SupabaseClient, {
+  get(target, prop, receiver) {
+    const client = getSupabaseClient();
+    const value = Reflect.get(client, prop);
+    if (typeof value === 'function') {
+      return value.bind(client);
+    }
+    return value;
+  }
 });
 
 // Storage bucket used by the generic /api/v1/upload endpoint.

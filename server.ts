@@ -18,6 +18,21 @@
  * users without doing that step first.
  */
 
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
+
+// Clean quotes and whitespace from critical env vars to prevent "Invalid API key" and connection errors
+const cleanEnvVar = (name: string) => {
+  if (process.env[name]) {
+    process.env[name] = process.env[name]!.replace(/^["']|["']$/g, '').trim();
+  }
+};
+cleanEnvVar('SUPABASE_URL');
+cleanEnvVar('SUPABASE_ANON_KEY');
+cleanEnvVar('SUPABASE_SERVICE_ROLE_KEY');
+cleanEnvVar('VITE_SUPABASE_URL');
+cleanEnvVar('VITE_SUPABASE_ANON_KEY');
+
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
@@ -212,139 +227,169 @@ app.use('/api/v1', (req, res, next) => {
 });
 
 app.post('/api/v1/auth/signup', async (req, res) => {
-  const { email, password, fullName, role, phone, ...profileFields } = req.body;
+  try {
+    const { email, password, fullName, role, phone, ...profileFields } = req.body;
 
-  if (!email || !password || !fullName) {
-    return res.status(400).json({ title: 'Bad Request', message: 'Email, password and Full Name are required.' });
-  }
+    if (!email || !password || !fullName) {
+      return res.status(400).json({ title: 'Bad Request', message: 'Email, password and Full Name are required.' });
+    }
 
-  // 1. Validate role is allowed for self-registration
-  const selfRegRoles = ['TRAINEE', 'SUPERVISOR'];
-  const userRole = role || 'TRAINEE';
-  if (!selfRegRoles.includes(userRole)) {
-    return res.status(403).json({ title: 'Forbidden', message: 'Officers and Admins are created by Admin only.' });
-  }
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(500).json({
+        title: 'Configuration Error',
+        message: 'Supabase URL or Service Role Key is not configured. Please add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to your Secrets.'
+      });
+    }
 
-  // 2. Create Supabase Auth user (service role can create without email confirmation)
-  const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
-    email,
-    password,
-    phone: phone ?? undefined,
-    email_confirm: true,
-  });
+    // 1. Validate role is allowed for self-registration
+    const selfRegRoles = ['TRAINEE', 'SUPERVISOR'];
+    const userRole = role || 'TRAINEE';
+    if (!selfRegRoles.includes(userRole)) {
+      return res.status(403).json({ title: 'Forbidden', message: 'Officers and Admins are created by Admin only.' });
+    }
 
-  if (authErr || !authData?.user) {
-    return res.status(400).json({ title: 'Signup failed', message: authErr?.message ?? 'Could not create auth user' });
-  }
+    // 2. Create Supabase Auth user (service role can create without email confirmation)
+    const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      phone: phone ?? undefined,
+      email_confirm: true,
+    });
 
-  // 3. Insert into app users table, linking auth_user_id
-  const { data: newUser, error: insertErr } = await supabase.from('users').insert({
-    auth_user_id: authData.user.id,
-    role: userRole,
-    full_name: fullName,
-    email: email.toLowerCase(),
-    phone: phone ?? null,
-    is_active: true,
-    is_approved_for_login: userRole === 'TRAINEE' ? false : true,
-  }).select().single();
+    if (authErr || !authData?.user) {
+      return res.status(400).json({ title: 'Signup failed', message: authErr?.message ?? 'Could not create auth user' });
+    }
 
-  if (insertErr) {
-    // Rollback: delete the Auth user we just created to avoid orphans
-    await supabase.auth.admin.deleteUser(authData.user.id);
-    return res.status(500).json({ title: 'DB error', message: insertErr.message });
-  }
+    // 3. Insert into app users table, linking auth_user_id
+    const { data: newUser, error: insertErr } = await supabase.from('users').insert({
+      auth_user_id: authData.user.id,
+      role: userRole,
+      full_name: fullName,
+      email: email.toLowerCase(),
+      phone: phone ?? null,
+      is_active: true,
+      is_approved_for_login: userRole === 'TRAINEE' ? false : true,
+    }).select().single();
 
-  // 4. Insert role profile (trainee/supervisor)
-  if (userRole === 'TRAINEE') {
-    const settings = await getSystemSettings();
-    await supabase.from('trainee_profiles').insert({
-      user_id: newUser.id,
-      admission_no: profileFields.admissionNo || `KNPSS/ADMIT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`,
-      course_code: profileFields.courseCode || 'DICT',
-      course_name: profileFields.courseName || 'Diploma in Information Communication Technology',
-      cohort: profileFields.cohort || '2024 Intake',
-      attachment_duration_weeks: profileFields.attachmentDurationWeeks ?? settings?.attachment_duration_weeks ?? 12,
+    if (insertErr) {
+      // Rollback: delete the Auth user we just created to avoid orphans
+      await supabase.auth.admin.deleteUser(authData.user.id);
+      return res.status(500).json({ title: 'DB error', message: insertErr.message });
+    }
+
+    // 4. Insert role profile (trainee/supervisor)
+    if (userRole === 'TRAINEE') {
+      const settings = await getSystemSettings();
+      await supabase.from('trainee_profiles').insert({
+        user_id: newUser.id,
+        admission_no: profileFields.admissionNo || `KNPSS/ADMIT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`,
+        course_code: profileFields.courseCode || 'DICT',
+        course_name: profileFields.courseName || 'Diploma in Information Communication Technology',
+        cohort: profileFields.cohort || '2024 Intake',
+        attachment_duration_weeks: profileFields.attachmentDurationWeeks ?? settings?.attachment_duration_weeks ?? 12,
+      });
+    }
+    if (userRole === 'SUPERVISOR') {
+      await supabase.from('supervisor_profiles').insert({
+        user_id: newUser.id,
+        company_name: profileFields.companyName || 'Kenya Power and Lighting Company',
+        job_title: profileFields.jobTitle ?? null,
+        department: profileFields.department ?? null,
+        work_email: profileFields.workEmail ?? null,
+        work_phone: profileFields.workPhone ?? null,
+      });
+    }
+
+    await logAudit(newUser.id, 'USER_SIGNUP', 'USER', newUser.id, undefined, toCamelCase(newUser), req.ip);
+
+    return res.status(201).json({
+      user: {
+        id: newUser.id,
+        role: newUser.role,
+        fullName: newUser.full_name,
+        email: newUser.email,
+        isApprovedForLogin: newUser.is_approved_for_login,
+      },
+      message: userRole === 'TRAINEE'
+        ? 'Account created. Awaiting Admin approval before you can log in.'
+        : 'Account created. You can now log in.',
+    });
+  } catch (error: any) {
+    console.error('Signup route error:', error);
+    return res.status(500).json({
+      title: 'Internal Server Error',
+      message: error?.message || 'An unexpected error occurred during signup.'
     });
   }
-  if (userRole === 'SUPERVISOR') {
-    await supabase.from('supervisor_profiles').insert({
-      user_id: newUser.id,
-      company_name: profileFields.companyName || 'Kenya Power and Lighting Company',
-      job_title: profileFields.jobTitle ?? null,
-      department: profileFields.department ?? null,
-      work_email: profileFields.workEmail ?? null,
-      work_phone: profileFields.workPhone ?? null,
-    });
-  }
-
-  await logAudit(newUser.id, 'USER_SIGNUP', 'USER', newUser.id, undefined, toCamelCase(newUser), req.ip);
-
-  return res.status(201).json({
-    user: {
-      id: newUser.id,
-      role: newUser.role,
-      fullName: newUser.full_name,
-      email: newUser.email,
-      isApprovedForLogin: newUser.is_approved_for_login,
-    },
-    message: userRole === 'TRAINEE'
-      ? 'Account created. Awaiting Admin approval before you can log in.'
-      : 'Account created. You can now log in.',
-  });
 });
 
 app.post('/api/v1/auth/login', async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ title: 'Bad Request', message: 'Email and password are required.' });
+    if (!email || !password) {
+      return res.status(400).json({ title: 'Bad Request', message: 'Email and password are required.' });
+    }
+
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      return res.status(500).json({
+        title: 'Configuration Error',
+        message: 'Supabase URL or Anonymous Key is not configured. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your Secrets.'
+      });
+    }
+
+    // 1. Authenticate via Supabase Auth — this validates the password
+    const anonClient = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+    const { data: session, error: loginErr } = await anonClient.auth.signInWithPassword({ email, password });
+
+    if (loginErr || !session?.session) {
+      return res.status(401).json({ title: 'Invalid credentials', message: loginErr?.message ?? 'Login failed' });
+    }
+
+    // 2. Look up app user row
+    const { data: user, error: findErr } = await supabase
+      .from('users')
+      .select('*')
+      .ilike('email', email)
+      .maybeSingle();
+
+    if (!user) {
+      return res.status(404).json({ title: 'Not found', message: 'No app profile for this account.' });
+    }
+    if (!user.is_active) {
+      return res.status(403).json({ title: 'Deactivated', message: 'Account is deactivated.' });
+    }
+    if (user.role === 'TRAINEE' && !user.is_approved_for_login) {
+      return res.status(403).json({ title: 'Pending approval', message: 'Account is pending Admin approval.' });
+    }
+
+    // 3. Update last login
+    await supabase.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id);
+
+    await logAudit(user.id, 'USER_LOGIN', 'USER', user.id, undefined, undefined, req.ip);
+
+    // 4. Return real Supabase JWT + app profile
+    return res.json({
+      accessToken: session.session.access_token,   // REAL JWT signed by Supabase
+      refreshToken: session.session.refresh_token,
+      expiresAt: session.session.expires_at,
+      user: {
+        id: user.id,
+        role: user.role,
+        fullName: user.full_name,
+        email: user.email,
+        phone: user.phone,
+        profilePhotoUrl: user.profile_photo_url,
+        isApprovedForLogin: user.is_approved_for_login,
+      },
+    });
+  } catch (error: any) {
+    console.error('Login route error:', error);
+    return res.status(500).json({
+      title: 'Internal Server Error',
+      message: error?.message || 'An unexpected error occurred during login.'
+    });
   }
-
-  // 1. Authenticate via Supabase Auth — this validates the password
-  const anonClient = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
-  const { data: session, error: loginErr } = await anonClient.auth.signInWithPassword({ email, password });
-
-  if (loginErr || !session?.session) {
-    return res.status(401).json({ title: 'Invalid credentials', message: loginErr?.message ?? 'Login failed' });
-  }
-
-  // 2. Look up app user row
-  const { data: user, error: findErr } = await supabase
-    .from('users')
-    .select('*')
-    .ilike('email', email)
-    .maybeSingle();
-
-  if (!user) {
-    return res.status(404).json({ title: 'Not found', message: 'No app profile for this account.' });
-  }
-  if (!user.is_active) {
-    return res.status(403).json({ title: 'Deactivated', message: 'Account is deactivated.' });
-  }
-  if (user.role === 'TRAINEE' && !user.is_approved_for_login) {
-    return res.status(403).json({ title: 'Pending approval', message: 'Account is pending Admin approval.' });
-  }
-
-  // 3. Update last login
-  await supabase.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id);
-
-  await logAudit(user.id, 'USER_LOGIN', 'USER', user.id, undefined, undefined, req.ip);
-
-  // 4. Return real Supabase JWT + app profile
-  return res.json({
-    accessToken: session.session.access_token,   // REAL JWT signed by Supabase
-    refreshToken: session.session.refresh_token,
-    expiresAt: session.session.expires_at,
-    user: {
-      id: user.id,
-      role: user.role,
-      fullName: user.full_name,
-      email: user.email,
-      phone: user.phone,
-      profilePhotoUrl: user.profile_photo_url,
-      isApprovedForLogin: user.is_approved_for_login,
-    },
-  });
 });
 
 app.post('/api/v1/auth/refresh', async (req, res) => {
