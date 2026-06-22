@@ -8,18 +8,53 @@
 create extension if not exists "pgcrypto"; -- gen_random_uuid()
 
 -- Enum types --------------------------------------------------------------
-create type user_role as enum ('TRAINEE','OFFICER','SUPERVISOR','ADMIN');
-create type placement_status as enum ('UNPLACED','PLACED','ACTIVE','ASSESSED','COMPLETED');
-create type entry_status as enum ('DRAFT','SUBMITTED','APPROVED','REJECTED','CORRECTION_REQUESTED');
-create type doc_category as enum ('INSURANCE','NITA','LETTER','POLICY','FORM','MANUAL','OTHER');
-create type download_policy as enum ('UNLIMITED','VIEW_ONLY','SINGLE','N_DOWNLOADS');
-create type doc_visibility as enum ('ALL','COHORT','PROGRAM');
-create type eligibility_status as enum ('PENDING','ELIGIBLE','INELIGIBLE');
-create type officer_availability as enum ('AVAILABLE','ON_FIELD_VISIT','ON_LEAVE','BUSY');
-create type permissions_role as enum ('PRIMARY_OFFICER','AUDITOR','SYSTEM_ADMIN');
-create type sms_status as enum ('SENT','FAILED');
-create type attendance_status as enum ('Present','Absent','Half-Day');
-create type day_of_week as enum ('Monday','Tuesday','Wednesday','Thursday','Friday');
+DO $$ BEGIN
+  CREATE TYPE user_role AS ENUM ('TRAINEE','OFFICER','SUPERVISOR','ADMIN');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE placement_status AS ENUM ('UNPLACED','PLACED','ACTIVE','ASSESSED','COMPLETED');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE entry_status AS ENUM ('DRAFT','SUBMITTED','APPROVED','REJECTED','CORRECTION_REQUESTED');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE doc_category AS ENUM ('INSURANCE','NITA','LETTER','POLICY','FORM','MANUAL','OTHER');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE download_policy AS ENUM ('UNLIMITED','VIEW_ONLY','SINGLE','N_DOWNLOADS');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE doc_visibility AS ENUM ('ALL','COHORT','PROGRAM');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE eligibility_status AS ENUM ('PENDING','ELIGIBLE','INELIGIBLE');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE officer_availability AS ENUM ('AVAILABLE','ON_FIELD_VISIT','ON_LEAVE','BUSY');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE permissions_role AS ENUM ('PRIMARY_OFFICER','AUDITOR','SYSTEM_ADMIN');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE sms_status AS ENUM ('SENT','FAILED');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE attendance_status AS ENUM ('Present','Absent','Half-Day');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE day_of_week AS ENUM ('Monday','Tuesday','Wednesday','Thursday','Friday');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 -- ============================================================================
 -- USERS  (mirrors Supabase Auth via auth_user_id; keep app-level table for

@@ -322,6 +322,8 @@ export default function App() {
   const [signUpEmail, setSignUpEmail] = useState<string>('');
   const [signUpPhone, setSignUpPhone] = useState<string>('');
   const [signUpRole, setSignUpRole] = useState<UserRole>('TRAINEE');
+  const [signUpPassword, setSignUpPassword] = useState<string>('');
+  const [signUpConfirmPassword, setSignUpConfirmPassword] = useState<string>('');
   
   // Custom expandable properties for sections
   const [profilePersonalExpanded, setProfilePersonalExpanded] = useState(true);
@@ -822,17 +824,31 @@ export default function App() {
         setCurrentUser(data.user);
         setActiveTab('dashboard');
       } else {
-        const errObj = await res.json();
-        setErrorMsg(errObj.detail || 'Incorrect sign-in details');
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errObj = await res.json();
+          setErrorMsg(errObj.message || errObj.detail || 'Incorrect sign-in details');
+        } else {
+          const text = await res.text();
+          setErrorMsg(`Error ${res.status}: ${text.substring(0, 150)}`);
+        }
       }
-    } catch (err) {
-      setErrorMsg('Server cluster inaccessible.');
+    } catch (err: any) {
+      setErrorMsg(`Server cluster inaccessible. ${err?.message || ''}`);
     }
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    if (!signUpPassword) {
+      setErrorMsg('Password is required.');
+      return;
+    }
+    if (signUpPassword !== signUpConfirmPassword) {
+      setErrorMsg('Passwords do not match.');
+      return;
+    }
     try {
       const res = await fetch('/api/v1/auth/signup', {
         method: 'POST',
@@ -841,7 +857,8 @@ export default function App() {
           fullName: signUpFullName, 
           email: signUpEmail, 
           phone: signUpPhone,
-          role: signUpRole 
+          role: signUpRole,
+          password: signUpPassword
         })
       });
       if (res.ok) {
@@ -853,13 +870,21 @@ export default function App() {
         setSignUpEmail('');
         setSignUpPhone('');
         setSignUpRole('TRAINEE');
+        setSignUpPassword('');
+        setSignUpConfirmPassword('');
         setIsSignUp(false);
       } else {
-        const errObj = await res.json();
-        setErrorMsg(errObj.detail || 'Sign up registration failed');
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errObj = await res.json();
+          setErrorMsg(errObj.message || errObj.detail || 'Sign up registration failed');
+        } else {
+          const text = await res.text();
+          setErrorMsg(`Error ${res.status}: ${text.substring(0, 150)}`);
+        }
       }
-    } catch (err) {
-      setErrorMsg('Server cluster inaccessible.');
+    } catch (err: any) {
+      setErrorMsg(`Server cluster inaccessible. ${err?.message || ''}`);
     }
   };
 
@@ -1988,6 +2013,38 @@ export default function App() {
                       <option value="SUPERVISOR">Industry Host Supervisor</option>
                       <option value="OFFICER">Assessment Dispatch Officer</option>
                     </select>
+                  </div>
+
+                  {/* Password field */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                      CHOOSE PASSPHRASE
+                    </label>
+                    <input 
+                      type="password" 
+                      value={signUpPassword} 
+                      onChange={(e) => setSignUpPassword(e.target.value)}
+                      className="w-full h-[52.5px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                      placeholder="••••••••"
+                      required
+                      minLength={6}
+                    />
+                  </div>
+
+                  {/* Confirm Password field */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                      CONFIRM PASSPHRASE
+                    </label>
+                    <input 
+                      type="password" 
+                      value={signUpConfirmPassword} 
+                      onChange={(e) => setSignUpConfirmPassword(e.target.value)}
+                      className="w-full h-[52.5px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                      placeholder="••••••••"
+                      required
+                      minLength={6}
+                    />
                   </div>
 
                   {/* Create Account primary button */}

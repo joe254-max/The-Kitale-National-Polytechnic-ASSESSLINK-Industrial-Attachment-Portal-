@@ -22,9 +22,19 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { supabase, UPLOADS_BUCKET } from './supabaseClient';
+import { createClient } from '@supabase/supabase-js';
+import { Request, Response, NextFunction } from 'express';
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 3000;
+
+const requiredEnvVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY'];
+for (const v of requiredEnvVars) {
+  if (!process.env[v]) {
+    console.warn(`Warning: Missing required env var: ${v} (Ignored during compile/init, but must be set at runtime)`);
+  }
+}
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -162,170 +172,219 @@ function problem(res: express.Response, status: number, title: string, detail: s
 // ============================================================================
 // 9.1 Authentication Endpoints
 // ============================================================================
-app.post('/api/v1/auth/login', async (req, res) => {
-  const userEmail: string | undefined = req.body?.email || (req.query?.email as string | undefined);
+// ============================================================================
+// Auth Middleware & Authentication Endpoints
+// ============================================================================
 
-  if (!userEmail) {
-    return problem(res, 400, 'Bad Request', 'Email address is required');
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) {
+    return res.status(401).json({ title: 'Unauthorized', message: 'No token provided.' });
   }
 
-  const { data: existingUser, error: findErr } = await supabase
-    .from('users')
-    .select('*')
-    .ilike('email', userEmail)
-    .maybeSingle();
-  if (findErr) return res.status(500).json({ error: findErr.message });
+  // Validate JWT via Supabase — getUser() verifies the token signature
+  const { data: { user }, error } = await supabase.auth.getUser(token);
 
-  let user = existingUser;
+  if (error || !user) {
+    return res.status(401).json({ title: 'Unauthorized', message: 'Invalid or expired session.' });
+  }
 
-  // If the user doesn't exist, register them on the fly (matches original behavior)
-  if (!user) {
-    const namePrefix = userEmail.split('@')[0];
-    const fullName = namePrefix.charAt(0).toUpperCase() + namePrefix.slice(1).replace(/[._]/g, ' ');
+  // Attach the Supabase auth user to the request for downstream use
+  (req as any).authUser = user;
+  next();
+}
 
-    const { data: newUser, error: insertErr } = await supabase
-      .from('users')
-      .insert({
-        role: 'TRAINEE',
-        full_name: fullName,
-        email: userEmail.toLowerCase(),
-        phone: '',
-        profile_photo_url:
-          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
-        is_active: true,
-        is_approved_for_login: false,
-      })
-      .select()
-      .single();
-    if (insertErr) return res.status(500).json({ error: insertErr.message });
+// Apply to ALL protected routes (everything except the /auth/* endpoints and USSD callback):
+app.use('/api/v1', (req, res, next) => {
+  const path = req.path;
+  const publicPaths = [
+    '/auth/login',
+    '/auth/signup',
+    '/auth/forgot-password',
+    '/auth/verify-otp',
+    '/auth/reset-password',
+    '/ussd/callback'
+  ];
+  if (publicPaths.includes(path) || path.startsWith('/auth/')) {
+    return next();
+  }
+  return requireAuth(req, res, next);
+});
 
+app.post('/api/v1/auth/signup', async (req, res) => {
+  const { email, password, fullName, role, phone, ...profileFields } = req.body;
+
+  if (!email || !password || !fullName) {
+    return res.status(400).json({ title: 'Bad Request', message: 'Email, password and Full Name are required.' });
+  }
+
+  // 1. Validate role is allowed for self-registration
+  const selfRegRoles = ['TRAINEE', 'SUPERVISOR'];
+  const userRole = role || 'TRAINEE';
+  if (!selfRegRoles.includes(userRole)) {
+    return res.status(403).json({ title: 'Forbidden', message: 'Officers and Admins are created by Admin only.' });
+  }
+
+  // 2. Create Supabase Auth user (service role can create without email confirmation)
+  const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    phone: phone ?? undefined,
+    email_confirm: true,
+  });
+
+  if (authErr || !authData?.user) {
+    return res.status(400).json({ title: 'Signup failed', message: authErr?.message ?? 'Could not create auth user' });
+  }
+
+  // 3. Insert into app users table, linking auth_user_id
+  const { data: newUser, error: insertErr } = await supabase.from('users').insert({
+    auth_user_id: authData.user.id,
+    role: userRole,
+    full_name: fullName,
+    email: email.toLowerCase(),
+    phone: phone ?? null,
+    is_active: true,
+    is_approved_for_login: userRole === 'TRAINEE' ? false : true,
+  }).select().single();
+
+  if (insertErr) {
+    // Rollback: delete the Auth user we just created to avoid orphans
+    await supabase.auth.admin.deleteUser(authData.user.id);
+    return res.status(500).json({ title: 'DB error', message: insertErr.message });
+  }
+
+  // 4. Insert role profile (trainee/supervisor)
+  if (userRole === 'TRAINEE') {
     const settings = await getSystemSettings();
-    await createDefaultTraineeProfile(newUser.id, settings?.attachment_duration_weeks ?? 12);
-
-    await logAudit(newUser.id, 'AUTO_SIGNUP_ON_LOGIN', 'USER', newUser.id, undefined, toCamelCase(newUser), req.ip);
-
-    return problem(
-      res,
-      403,
-      'Approval Pending',
-      'Your student credentials have been added to the Enrolled Trainees Directory. Login is locked pending mandatory Admin approval.'
-    );
+    await supabase.from('trainee_profiles').insert({
+      user_id: newUser.id,
+      admission_no: profileFields.admissionNo || `KNPSS/ADMIT/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`,
+      course_code: profileFields.courseCode || 'DICT',
+      course_name: profileFields.courseName || 'Diploma in Information Communication Technology',
+      cohort: profileFields.cohort || '2024 Intake',
+      attachment_duration_weeks: profileFields.attachmentDurationWeeks ?? settings?.attachment_duration_weeks ?? 12,
+    });
   }
-
-  if (!user.is_active) {
-    return res.status(401).json({
-      type: 'about:blank',
-      title: 'Unauthorized',
-      status: 410,
-      detail: 'This account has been deactivated',
+  if (userRole === 'SUPERVISOR') {
+    await supabase.from('supervisor_profiles').insert({
+      user_id: newUser.id,
+      company_name: profileFields.companyName || 'Kenya Power and Lighting Company',
+      job_title: profileFields.jobTitle ?? null,
+      department: profileFields.department ?? null,
+      work_email: profileFields.workEmail ?? null,
+      work_phone: profileFields.workPhone ?? null,
     });
   }
 
-  if (user.role === 'TRAINEE' && user.is_approved_for_login === false) {
-    return problem(
-      res,
-      403,
-      'Approval Pending',
-      'Your account is in the Trainees Directory, but your permanent active login is locked. Please request Admin approval.'
-    );
+  await logAudit(newUser.id, 'USER_SIGNUP', 'USER', newUser.id, undefined, toCamelCase(newUser), req.ip);
+
+  return res.status(201).json({
+    user: {
+      id: newUser.id,
+      role: newUser.role,
+      fullName: newUser.full_name,
+      email: newUser.email,
+      isApprovedForLogin: newUser.is_approved_for_login,
+    },
+    message: userRole === 'TRAINEE'
+      ? 'Account created. Awaiting Admin approval before you can log in.'
+      : 'Account created. You can now log in.',
+  });
+});
+
+app.post('/api/v1/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ title: 'Bad Request', message: 'Email and password are required.' });
   }
 
-  const { data: updatedUser, error: updateErr } = await supabase
+  // 1. Authenticate via Supabase Auth — this validates the password
+  const anonClient = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+  const { data: session, error: loginErr } = await anonClient.auth.signInWithPassword({ email, password });
+
+  if (loginErr || !session?.session) {
+    return res.status(401).json({ title: 'Invalid credentials', message: loginErr?.message ?? 'Login failed' });
+  }
+
+  // 2. Look up app user row
+  const { data: user, error: findErr } = await supabase
     .from('users')
-    .update({ last_login_at: new Date().toISOString() })
-    .eq('id', user.id)
-    .select()
-    .single();
-  if (updateErr) return res.status(500).json({ error: updateErr.message });
-  user = updatedUser;
+    .select('*')
+    .ilike('email', email)
+    .maybeSingle();
+
+  if (!user) {
+    return res.status(404).json({ title: 'Not found', message: 'No app profile for this account.' });
+  }
+  if (!user.is_active) {
+    return res.status(403).json({ title: 'Deactivated', message: 'Account is deactivated.' });
+  }
+  if (user.role === 'TRAINEE' && !user.is_approved_for_login) {
+    return res.status(403).json({ title: 'Pending approval', message: 'Account is pending Admin approval.' });
+  }
+
+  // 3. Update last login
+  await supabase.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id);
 
   await logAudit(user.id, 'USER_LOGIN', 'USER', user.id, undefined, undefined, req.ip);
 
-  res.json({
-    accessToken: `at_jwt_${user.id}_${Math.random().toString(36).substring(2, 11)}`,
+  // 4. Return real Supabase JWT + app profile
+  return res.json({
+    accessToken: session.session.access_token,   // REAL JWT signed by Supabase
+    refreshToken: session.session.refresh_token,
+    expiresAt: session.session.expires_at,
     user: {
       id: user.id,
       role: user.role,
       fullName: user.full_name,
       email: user.email,
       phone: user.phone,
-      isApprovedForLogin: user.is_approved_for_login,
       profilePhotoUrl: user.profile_photo_url,
+      isApprovedForLogin: user.is_approved_for_login,
     },
   });
 });
 
-app.post('/api/v1/auth/signup', async (req, res) => {
-  const { fullName, email, phone, role } = req.body;
-  if (!fullName || !email) {
-    return res.status(400).json({ title: 'Bad Request', detail: 'Full Name and Email are required fields' });
+app.post('/api/v1/auth/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ message: 'refreshToken required' });
+
+  const anonClient = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+  const { data: refreshed, error: refErr } = await anonClient.auth.refreshSession({ refresh_token: refreshToken });
+
+  if (refErr || !refreshed?.session) {
+    return res.status(401).json({ message: 'Session expired. Please log in again.' });
   }
 
-  const { data: existingUser } = await supabase.from('users').select('id').ilike('email', email).maybeSingle();
-  if (existingUser) {
-    return res.status(400).json({ title: 'Bad Request', detail: 'An account with this email address already exists' });
-  }
-
-  const userRole = role || 'TRAINEE';
-  const { data: newUser, error } = await supabase
-    .from('users')
-    .insert({
-      role: userRole,
-      full_name: fullName,
-      email: email.toLowerCase(),
-      phone: phone || '',
-      profile_photo_url:
-        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
-      is_active: true,
-      is_approved_for_login: userRole === 'TRAINEE' ? false : true,
-      last_login_at: new Date().toISOString(),
-    })
-    .select()
-    .single();
-  if (error) return res.status(500).json({ error: error.message });
-
-  if (userRole === 'TRAINEE') {
-    const settings = await getSystemSettings();
-    await createDefaultTraineeProfile(newUser.id, settings?.attachment_duration_weeks ?? 12);
-  }
-
-  await logAudit(newUser.id, 'USER_SIGNUP', 'USER', newUser.id, undefined, toCamelCase(newUser), req.ip);
-
-  res.json({
-    accessToken: `at_jwt_${newUser.id}_${Math.random().toString(36).substring(2, 11)}`,
-    user: {
-      id: newUser.id,
-      role: newUser.role,
-      fullName: newUser.full_name,
-      email: newUser.email,
-      phone: newUser.phone,
-      isApprovedForLogin: newUser.is_approved_for_login,
-      profilePhotoUrl: newUser.profile_photo_url,
-    },
+  return res.json({
+    accessToken: refreshed.session.access_token,
+    refreshToken: refreshed.session.refresh_token,
+    expiresAt: refreshed.session.expires_at,
   });
 });
 
-app.post('/api/v1/auth/refresh', (_req, res) => {
-  res.json({ accessToken: `at_jwt_refresh_${Date.now()}` });
-});
-
-app.delete('/api/v1/auth/logout', (_req, res) => {
-  res.status(200).send('OK');
+app.delete('/api/v1/auth/logout', async (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (token) {
+    await supabase.auth.signOut();
+  }
+  return res.json({ message: 'Logged out.' });
 });
 
 app.post('/api/v1/auth/forgot-password', async (req, res) => {
   const { email } = req.body;
-  const { data: user, error } = await supabase.from('users').select('*').ilike('email', email ?? '').maybeSingle();
-  if (error) return res.status(500).json({ error: error.message });
-  if (!user) return res.status(404).json({ title: 'Not Found', detail: 'Email not discovered' });
-
-  const otp = Math.floor(100000 + Math.random() * 90000).toString();
-  if (user.phone) {
-    await sendSMS(user.phone, `Your KNPSS Link password reset code is ${otp}. Expires in 10 minutes. Do not share.`);
+  if (!email) {
+    return res.status(400).json({ message: 'Email is required' });
   }
-  await logAudit(user.id, 'PASSWORD_RESET_OTP_TRIGGERED', 'USER', user.id, undefined, undefined, req.ip);
+  const { error } = await supabase.auth.admin.generateLink({
+    type: 'recovery',
+    email,
+    options: { redirectTo: `${process.env.APP_URL || 'http://localhost:3000'}/reset-password` },
+  });
 
-  res.json({ message: 'OTP sent to your email and phone number.', simulatedOtp: otp });
+  return res.json({ message: 'If that email is registered, a password reset link has been sent.' });
 });
 
 app.post('/api/v1/auth/verify-otp', (_req, res) => {
@@ -334,6 +393,29 @@ app.post('/api/v1/auth/verify-otp', (_req, res) => {
 
 app.post('/api/v1/auth/reset-password', (_req, res) => {
   res.json({ status: 'success', detail: 'Password resets finalized successfully.' });
+});
+
+app.post('/api/v1/auth/change-password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const authUser = (req as any).authUser;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ message: 'Both current password and new password are required.' });
+  }
+
+  // Re-authenticate to verify current password
+  const anonClient = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+  const { error: verifyErr } = await anonClient.auth.signInWithPassword({
+    email: authUser.email,
+    password: currentPassword,
+  });
+  if (verifyErr) return res.status(401).json({ message: 'Current password is wrong.' });
+
+  // Update to new password
+  const { error: updateErr } = await supabase.auth.admin.updateUserById(authUser.id, { password: newPassword });
+  if (updateErr) return res.status(500).json({ message: updateErr.message });
+
+  return res.json({ message: 'Password updated successfully.' });
 });
 
 // ============================================================================
@@ -390,24 +472,57 @@ app.post('/api/v1/users/:id/approve-login', async (req, res) => {
 app.post('/api/v1/users', async (req, res) => {
   const { role, fullName, email, phone, profilePhotoUrl } = req.body;
 
+  if (!email || !fullName) {
+    return res.status(400).json({ title: 'Bad Request', message: 'Email and Full Name are required.' });
+  }
+
+  // 1. Generate a secure temporary password
+  const tempPassword = `KNPSS-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+  // 2. Create the Auth user using the service role admin client
+  const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+    email,
+    password: tempPassword,
+    phone: phone ?? undefined,
+    email_confirm: true,
+  });
+
+  if (authErr || !authData?.user) {
+    return res.status(400).json({ title: 'User creation failed', message: authErr?.message ?? 'Could not create auth user' });
+  }
+
+  // 3. Link the user row with auth_user_id
   const { data: newUser, error } = await supabase
     .from('users')
     .insert({
+      auth_user_id: authData.user.id,
       role,
       full_name: fullName,
-      email,
-      phone,
+      email: email.toLowerCase(),
+      phone: phone || null,
       profile_photo_url:
         profilePhotoUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
       is_active: true,
+      is_approved_for_login: role === 'TRAINEE' ? false : true,
     })
     .select()
     .single();
-  if (error) return res.status(500).json({ error: error.message });
 
+  if (error) {
+    // Rollback Auth user creation to prevent orphans
+    await supabase.auth.admin.deleteUser(authData.user.id);
+    return res.status(500).json({ error: error.message });
+  }
+
+  // 4. Create trainee profile if TRAINEE
   if (role === 'TRAINEE') {
     const settings = await getSystemSettings();
     await createDefaultTraineeProfile(newUser.id, settings?.attachment_duration_weeks ?? 12);
+  }
+
+  // 5. Send credentials via simulated SMS
+  if (phone) {
+    await sendSMS(phone, `Your KNPSS Link login: email=${email}, temp password=${tempPassword}. Change on first login.`);
   }
 
   await logAudit(undefined, 'USER_CREATION_ADMIN', 'USER', newUser.id, undefined, toCamelCase(newUser), req.ip);
@@ -1492,30 +1607,111 @@ app.get('/api/v1/analytics/placement-stats', async (_req, res) => {
   ]);
 });
 
-app.get('/api/v1/analytics/submission-trend', (_req, res) => {
-  res.json([
-    { day: 'Mon', submissions: 14, approved: 12 },
-    { day: 'Tue', submissions: 19, approved: 17 },
-    { day: 'Wed', submissions: 22, approved: 18 },
-    { day: 'Thu', submissions: 15, approved: 15 },
-    { day: 'Fri', submissions: 26, approved: 23 },
-    { day: 'Sat', submissions: 5, approved: 4 },
-    { day: 'Sun', submissions: 2, approved: 2 },
-  ]);
+app.get('/api/v1/analytics/submission-trend', async (_req, res) => {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  const { data: entries, error } = await supabase
+    .from('logbook_entries')
+    .select('created_at, status')
+    .gte('created_at', sevenDaysAgo);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const byDay: Record<string, { submissions: number; approved: number }> = {};
+  dayNames.forEach((d) => (byDay[d] = { submissions: 0, approved: 0 }));
+
+  (entries || []).forEach((e) => {
+    const day = dayNames[new Date(e.created_at).getDay()];
+    byDay[day].submissions += 1;
+    if (e.status === 'APPROVED') byDay[day].approved += 1;
+  });
+
+  res.json(dayNames.map((day) => ({ day, ...byDay[day] })));
 });
 
-app.get('/api/v1/analytics/missing-logbooks', (_req, res) => {
-  res.json([
-    { id: 'tp-2', fullName: 'Mary Wambui', admissionNo: 'KNPSS/DEEE/2022/9104', companyName: 'Athee River Cement Works', missingCount: 4 },
-  ]);
+app.get('/api/v1/analytics/missing-logbooks', async (_req, res) => {
+  const { data: placements, error } = await supabase.from('placements').select('*').in('status', ['PLACED', 'ACTIVE']);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const results = [];
+  for (const pl of placements || []) {
+    if (!pl.start_date) continue;
+    const { data: entries } = await supabase
+      .from('logbook_entries')
+      .select('entry_date')
+      .eq('placement_id', pl.id)
+      .neq('status', 'DRAFT');
+
+    const start = new Date(pl.start_date);
+    const endLimit = pl.end_date ? new Date(pl.end_date) : new Date();
+    const today = new Date();
+    const compareMax = endLimit.getTime() < today.getTime() ? endLimit : today;
+
+    let missingCount = 0;
+    const current = new Date(start);
+    while (current.getTime() <= compareMax.getTime()) {
+      const day = current.getDay();
+      if (day !== 0 && day !== 6) {
+        const dateStr = current.toISOString().split('T')[0];
+        const hasEntry = (entries || []).some((le) => le.entry_date === dateStr);
+        if (!hasEntry) missingCount++;
+      }
+      current.setDate(current.getDate() + 1);
+    }
+
+    if (missingCount >= 3) {
+      const { data: tp } = await supabase.from('trainee_profiles').select('*').eq('id', pl.trainee_id).maybeSingle();
+      const { data: user } = tp ? await supabase.from('users').select('full_name').eq('id', tp.user_id).maybeSingle() : { data: null };
+      results.push({
+        id: pl.trainee_id,
+        fullName: user?.full_name || 'Unknown',
+        admissionNo: tp?.admission_no || 'N/A',
+        companyName: pl.company_name,
+        missingCount,
+      });
+    }
+  }
+
+  res.json(results);
 });
 
-app.get('/api/v1/analytics/officer-performance', async (_req, res) => {
-  const { count: assignedCount } = await supabase.from('placements').select('*', { count: 'exact', head: true }).eq('assigned_officer_id', 'u-officer-1');
-  const { count: verifiedCount } = await supabase.from('assessments').select('*', { count: 'exact', head: true });
-  const { count: pendingReviews } = await supabase.from('logbook_entries').select('*', { count: 'exact', head: true }).eq('status', 'SUBMITTED');
+app.get('/api/v1/analytics/officer-performance', async (req, res) => {
+  // Returns performance stats per officer. Pass ?officerId=<real uuid> to
+  // scope to one officer; without it, aggregates across all officers.
+  const officerId = req.query.officerId as string | undefined;
 
-  res.json([{ name: 'Mary Wanjiku', assignedCount: assignedCount || 0, verifiedCount: verifiedCount || 0, pendingReviews: pendingReviews || 0 }]);
+  let officerQuery = supabase.from('officer_profiles').select('id, user_id');
+  if (officerId) officerQuery = officerQuery.eq('id', officerId);
+  const { data: officers, error: officersErr } = await officerQuery;
+  if (officersErr) return res.status(500).json({ error: officersErr.message });
+
+  const { data: users } = await supabase.from('users').select('id, full_name');
+
+  const results = await Promise.all(
+    (officers || []).map(async (op) => {
+      const { count: assignedCount } = await supabase
+        .from('placements')
+        .select('*', { count: 'exact', head: true })
+        .eq('assigned_officer_id', op.id);
+      const { count: verifiedCount } = await supabase
+        .from('assessments')
+        .select('*', { count: 'exact', head: true })
+        .eq('officer_id', op.id);
+      const { count: pendingReviews } = await supabase
+        .from('logbook_entries')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'SUBMITTED');
+
+      const user = users?.find((u) => u.id === op.user_id);
+      return {
+        name: user?.full_name || 'Unknown Officer',
+        assignedCount: assignedCount || 0,
+        verifiedCount: verifiedCount || 0,
+        pendingReviews: pendingReviews || 0,
+      };
+    })
+  );
+
+  res.json(results);
 });
 
 app.get('/api/v1/analytics/document-report', async (_req, res) => {
