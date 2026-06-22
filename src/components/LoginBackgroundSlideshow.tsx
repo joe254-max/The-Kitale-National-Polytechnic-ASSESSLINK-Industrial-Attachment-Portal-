@@ -1,16 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
-// Import local images from the Images folder
-import bgImage1 from '../../Images/images (1).jpeg';
-import bgImage2 from '../../Images/images (2).jpeg';
-import bgImage3 from '../../Images/images (3).jpeg';
-import bgImage4 from '../../Images/images (4).jpeg';
-import bgImage5 from '../../Images/images (5).jpeg';
-import bgImage6 from '../../Images/images.jpeg';
-import bgImage7 from '../../Images/1776760797230.jpeg';
-import bgImage8 from '../../Images/mMzje.jpg';
-
 interface BackgroundSlide {
   id: number;
   url: string;
@@ -21,51 +11,63 @@ interface BackgroundSlide {
 const SLIDES: BackgroundSlide[] = [
   {
     id: 1,
-    url: bgImage1,
+    url: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=1400&fit=crop&q=80",
     label: "Collaborative Engineering Lab",
     activity: "Trainees designing electrical circuitry layouts"
   },
   {
     id: 2,
-    url: bgImage2,
+    url: "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=1400&fit=crop&q=80",
     label: "Information Systems Research",
     activity: "Analyzing regional server telemetry logs"
   },
   {
     id: 3,
-    url: bgImage3,
+    url: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=1400&fit=crop&q=80",
     label: "Civil & Structural Design Center",
     activity: "Assessing load-bearing dry mix parameters"
   },
   {
     id: 4,
-    url: bgImage4,
+    url: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=1400&fit=crop&q=80",
     label: "Food Process Automation Lab",
     activity: "Monitoring cold-chain logistics metrics"
   },
   {
     id: 5,
-    url: bgImage5,
+    url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=1400&fit=crop&q=80",
     label: "Automotive Diagnostics Studio",
     activity: "Analyzing hybrid engine telemetry reports"
   },
   {
     id: 6,
-    url: bgImage6,
+    url: "https://images.unsplash.com/photo-1548142813-c348350df52b?w=1400&fit=crop&q=80",
     label: "Hospitality Management Hub",
     activity: "Reviewing regional guest check-in trends"
   },
   {
     id: 7,
-    url: bgImage7,
+    url: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=1400&fit=crop&q=80",
     label: "Renewable Energy Design Unit",
     activity: "Commissioning decentralized solar kits"
   },
   {
     id: 8,
-    url: bgImage8,
+    url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1400&fit=crop&q=80",
     label: "Quantity Surveying Workshop",
     activity: "Evaluating material variance charts"
+  },
+  {
+    id: 9,
+    url: "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=1400&fit=crop&q=80",
+    label: "Applied Genomics Facility",
+    activity: "Validating safe viral culture benchmarks"
+  },
+  {
+    id: 10,
+    url: "https://images.unsplash.com/photo-1517256064527-09c53b2d0bc6?w=1400&fit=crop&q=80",
+    label: "Advanced Technical Training Center",
+    activity: "Simulating national grid dispatch codes"
   }
 ];
 

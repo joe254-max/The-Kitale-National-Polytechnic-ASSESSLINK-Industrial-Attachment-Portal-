@@ -17,19 +17,25 @@ import PlacementMap from './components/PlacementMap';
 import CapturePreviewMap from './components/CapturePreviewMap';
 import { LoginBackgroundSlideshow } from './components/LoginBackgroundSlideshow';
 
-// Import local images from the Images folder
-import bgImage1 from '../Images/images (1).jpeg';
-import bgImage2 from '../Images/images (2).jpeg';
-import bgImage3 from '../Images/images (3).jpeg';
-import bgImage4 from '../Images/images (4).jpeg';
-import bgImage5 from '../Images/images (5).jpeg';
-import bgImage6 from '../Images/images.jpeg';
-import bgImage7 from '../Images/1776760797230.jpeg';
-import bgImage8 from '../Images/mMzje.jpg';
-import mainLogo from '../LOGO.png';
-
 const KnpLogo = () => (
-  <img src={mainLogo} alt="Kitale National Polytechnic Logo" className="w-full h-full object-contain" />
+  <svg viewBox="0 0 120 120" className="w-full h-full text-[#7B1C2E]" fill="none" xmlns="http://www.w3.org/2000/svg">
+    {/* Clean Maroon Shield Base */}
+    <path d="M60 10 L25 22 C25 55 45 88 60 110 C75 88 95 55 95 22 L60 10 Z" fill="#7B1C2E" />
+    <path d="M60 15 L30 25 C30 52 48 82 60 102 C72 82 90 52 90 25 L60 15 Z" fill="white" />
+    
+    {/* Gothic Style Brand Initials */}
+    <text x="60" y="44" fill="#7B1C2E" fontSize="16" fontWeight="bold" textAnchor="middle" fontFamily="Georgia, serif">KNP</text>
+    
+    {/* Isometric Graduation Cap (Mortarboard) */}
+    <path d="M60 52 L85 60 L60 68 L35 60 Z" fill="#7B1C2E" />
+    <path d="M47 64 V74 C47 77 60 79 60 79 C60 79 73 77 73 74 V64" stroke="#7B1C2E" strokeWidth="2.5" fill="none" />
+    <path d="M76 60 V71" stroke="#7B1C2E" strokeWidth="1.5" />
+    <circle cx="76" cy="71" r="2" fill="#7B1C2E" />
+    
+    {/* Scroll/Banner */}
+    <path d="M22 84 C30 81 90 81 98 84 L98 94 C90 91 30 91 22 94 Z" fill="#7B1C2E" />
+    <text x="60" y="90" fill="white" fontSize="4.2" fontWeight="900" textAnchor="middle" fontFamily="sans-serif" letterSpacing="0.15">KITALE POLYTECHNIC</text>
+  </svg>
 );
 
 // Alert banner helper
@@ -101,44 +107,59 @@ function RotatingTypingText() {
 
 const backgroundImages = [
   {
-    url: bgImage1,
-    role: "Collaborative Study Group",
-    desc: "Trainee Peer Review & Innovation"
-  },
-  {
-    url: bgImage2,
-    role: "Software Engineer & Trainee",
-    desc: "Computer Science & IT Track"
-  },
-  {
-    url: bgImage3,
-    role: "Civil Engineering Supervisor",
-    desc: "Safety Protocols & Worksite Operations"
-  },
-  {
-    url: bgImage4,
-    role: "TVET Technical Educator",
-    desc: "Academic Mentorship & Guidance"
-  },
-  {
-    url: bgImage5,
-    role: "Electrical & Hardware Technician",
-    desc: "Mechatronics & Electronics Track"
-  },
-  {
-    url: bgImage6,
-    role: "Infrastructure Architect",
-    desc: "Structural Design & Drafting"
-  },
-  {
-    url: bgImage7,
+    url: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=1200",
     role: "Medical Student / Doctor",
     desc: "Healthcare & Therapeutics Track"
   },
   {
-    url: bgImage8,
+    url: "https://images.unsplash.com/photo-1531482615713-2afd69097998?auto=format&fit=crop&q=80&w=1200",
+    role: "Software Engineer & Trainee",
+    desc: "Computer Science & IT Track"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1594824813573-246434de83fb?auto=format&fit=crop&q=80&w=1200",
+    role: "Doctor & Medical Scholar",
+    desc: "Healthcare & Therapeutics Track"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?auto=format&fit=crop&q=80&w=1200",
+    role: "TVET Technical Educator",
+    desc: "Academic Mentorship & Guidance"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&q=80&w=1200",
+    role: "Civil Engineering Supervisor",
+    desc: "Safety Protocols & Worksite Operations"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1530210124550-912dc1381cb8?auto=format&fit=crop&q=80&w=1200",
+    role: "Laboratory Scientist",
+    desc: "Applied Biology & Chemistry Track"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&q=80&w=1200",
+    role: "Collaborative Study Group",
+    desc: "Trainee Peer Review & Innovation"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=1200",
+    role: "Electrical & Hardware Technician",
+    desc: "Mechatronics & Electronics Track"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=1200",
+    role: "Infrastructure Architect",
+    desc: "Structural Design & Drafting"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1593113598332-cd288d649433?auto=format&fit=crop&q=80&w=1200",
     role: "Bio-Tech Agronomist Analyst",
     desc: "Agricultural Sciences & Engineering"
+  },
+  {
+    url: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=1200",
+    role: "Senior Engineering Project Director",
+    desc: "Industrial Management Track"
   }
 ];
 
@@ -285,20 +306,6 @@ export default function App() {
   const [isLifecycleExpanded, setIsLifecycleExpanded] = useState(false);
   const [isLogbookFormOpenMobile, setIsLogbookFormOpenMobile] = useState(false);
 
-  // Forgot Password states
-  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
-  const [forgotPasswordStep, setForgotPasswordStep] = useState<'email' | 'otp' | 'reset'>('email');
-  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
-  const [forgotPasswordOtp, setForgotPasswordOtp] = useState('');
-  const [forgotPasswordNewPassword, setForgotPasswordNewPassword] = useState('');
-  const [forgotPasswordConfirmPassword, setForgotPasswordConfirmPassword] = useState('');
-  const [forgotPasswordResetToken, setForgotPasswordResetToken] = useState('');
-  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
-  const [forgotPasswordError, setForgotPasswordError] = useState('');
-  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState('');
-  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
-  const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
-
   // Trainee Profile specific states
   const [profileToast, setProfileToast] = useState<string | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -314,11 +321,7 @@ export default function App() {
   const [signUpFullName, setSignUpFullName] = useState<string>('');
   const [signUpEmail, setSignUpEmail] = useState<string>('');
   const [signUpPhone, setSignUpPhone] = useState<string>('');
-  const [signUpPassword, setSignUpPassword] = useState<string>('');
-  const [signUpConfirmPassword, setSignUpConfirmPassword] = useState<string>('');
   const [signUpRole, setSignUpRole] = useState<UserRole>('TRAINEE');
-  const [showSignUpPassword, setShowSignUpPassword] = useState<boolean>(false);
-  const [showSignUpConfirmPassword, setShowSignUpConfirmPassword] = useState<boolean>(false);
   
   // Custom expandable properties for sections
   const [profilePersonalExpanded, setProfilePersonalExpanded] = useState(true);
@@ -515,76 +518,6 @@ export default function App() {
     } catch (err: any) {
       console.error("PDF generation failed:", err);
       alert("Could not generate report. Please try again.");
-    }
-  };
-
-  const handleDownloadAssignedTimelinePDF = () => {
-    try {
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      let y = 15;
-
-      doc.setFontSize(16);
-      doc.setFont('Helvetica', 'bold');
-      doc.text('Assigned Students Attachment Timeline', 14, y);
-      y += 8;
-
-      doc.setFontSize(10);
-      doc.setFont('Helvetica', 'normal');
-      doc.text(`Generated: ${new Date().toLocaleString()}`, 14, y);
-      y += 10;
-
-      if (!placementsList || placementsList.length === 0) {
-        doc.text('No assigned students found.', 14, y);
-      } else {
-        const header = ['Student', 'Workplace', 'GPS Coords'];
-        const colWidths = [70, 70, 40];
-        const leftMargin = 14;
-
-        doc.setFont('Helvetica', 'bold');
-        doc.text(header[0], leftMargin, y);
-        doc.text(header[1], leftMargin + colWidths[0], y);
-        doc.text(header[2], leftMargin + colWidths[0] + colWidths[1], y);
-        y += 6;
-        doc.setDrawColor(200, 200, 200);
-        doc.line(leftMargin, y, 196, y);
-        y += 6;
-
-        doc.setFont('Helvetica', 'normal');
-
-        placementsList.forEach((item, index) => {
-          if (y > 280) {
-            doc.addPage();
-            y = 15;
-          }
-
-          const studentName = item.traineeUser?.fullName || 'Unknown Student';
-          const workplaceName = item.companyName || 'Unknown Workplace';
-          const coords = item.locationLat != null && item.locationLng != null ? `${item.locationLat.toFixed(5)}, ${item.locationLng.toFixed(5)}` : 'No Coords';
-
-          const studentLines = doc.splitTextToSize(studentName, colWidths[0]);
-          const workplaceLines = doc.splitTextToSize(workplaceName, colWidths[1]);
-          const maxLines = Math.max(studentLines.length, workplaceLines.length, 1);
-          const rowHeight = maxLines * 5 + 4;
-
-          if (y + rowHeight > 290) {
-            doc.addPage();
-            y = 15;
-          }
-
-          doc.text(studentLines, leftMargin, y);
-          doc.text(workplaceLines, leftMargin + colWidths[0], y);
-          doc.text(coords, leftMargin + colWidths[0] + colWidths[1], y);
-          y += rowHeight;
-
-          doc.setDrawColor(230, 230, 230);
-          doc.line(leftMargin, y - 2, 196, y - 2);
-        });
-      }
-
-      doc.save(`Assigned_Students_Timeline_${new Date().toISOString().slice(0, 10)}.pdf`);
-    } catch (err: any) {
-      console.error('Assigned timeline PDF failed:', err);
-      alert('Could not generate Assigned Students timeline PDF. Please try again.');
     }
   };
 
@@ -897,162 +830,9 @@ export default function App() {
     }
   };
 
-  // Forgot Password Handlers
-  const handleForgotPasswordSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setForgotPasswordError('');
-    setForgotPasswordLoading(true);
-
-    if (!forgotPasswordEmail.trim()) {
-      setForgotPasswordError('Please enter your email address');
-      setForgotPasswordLoading(false);
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/v1/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotPasswordEmail })
-      });
-
-      if (res.ok) {
-        setForgotPasswordSuccess('OTP sent to your email! Check your inbox.');
-        setForgotPasswordStep('otp');
-        setTimeout(() => setForgotPasswordSuccess(''), 3000);
-      } else {
-        const errObj = await res.json();
-        setForgotPasswordError(errObj.detail || 'Failed to send OTP');
-      }
-    } catch (err) {
-      setForgotPasswordError('Server error. Please try again.');
-    } finally {
-      setForgotPasswordLoading(false);
-    }
-  };
-
-  const handleForgotPasswordVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setForgotPasswordError('');
-    setForgotPasswordLoading(true);
-
-    if (!forgotPasswordOtp.trim()) {
-      setForgotPasswordError('Please enter the OTP');
-      setForgotPasswordLoading(false);
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/v1/auth/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotPasswordEmail, otp: forgotPasswordOtp })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setForgotPasswordResetToken(data.resetToken);
-        setForgotPasswordSuccess('OTP verified! Now set your new password.');
-        setForgotPasswordStep('reset');
-        setTimeout(() => setForgotPasswordSuccess(''), 3000);
-      } else {
-        const errObj = await res.json();
-        setForgotPasswordError(errObj.detail || 'Invalid OTP');
-      }
-    } catch (err) {
-      setForgotPasswordError('Server error. Please try again.');
-    } finally {
-      setForgotPasswordLoading(false);
-    }
-  };
-
-  const handleForgotPasswordReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setForgotPasswordError('');
-    setForgotPasswordLoading(true);
-
-    if (!forgotPasswordNewPassword.trim() || !forgotPasswordConfirmPassword.trim()) {
-      setForgotPasswordError('Please enter a new password and confirm it');
-      setForgotPasswordLoading(false);
-      return;
-    }
-
-    if (forgotPasswordNewPassword.length < 8) {
-      setForgotPasswordError('Password must be at least 8 characters long');
-      setForgotPasswordLoading(false);
-      return;
-    }
-
-    if (forgotPasswordNewPassword !== forgotPasswordConfirmPassword) {
-      setForgotPasswordError('Passwords do not match');
-      setForgotPasswordLoading(false);
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/v1/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          resetToken: forgotPasswordResetToken, 
-          newPassword: forgotPasswordNewPassword 
-        })
-      });
-
-      if (res.ok) {
-        setForgotPasswordSuccess('Password reset successfully! Redirecting to login...');
-        setTimeout(() => {
-          setIsForgotPasswordOpen(false);
-          setForgotPasswordStep('email');
-          setForgotPasswordEmail('');
-          setForgotPasswordOtp('');
-          setForgotPasswordNewPassword('');
-          setForgotPasswordConfirmPassword('');
-          setForgotPasswordResetToken('');
-          setForgotPasswordSuccess('');
-        }, 2000);
-      } else {
-        const errObj = await res.json();
-        setForgotPasswordError(errObj.detail || 'Failed to reset password');
-      }
-    } catch (err) {
-      setForgotPasswordError('Server error. Please try again.');
-    } finally {
-      setForgotPasswordLoading(false);
-    }
-  };
-
-  const closeForgotPassword = () => {
-    setIsForgotPasswordOpen(false);
-    setForgotPasswordStep('email');
-    setForgotPasswordEmail('');
-    setForgotPasswordOtp('');
-    setForgotPasswordNewPassword('');
-    setForgotPasswordConfirmPassword('');
-    setForgotPasswordResetToken('');
-    setForgotPasswordError('');
-    setForgotPasswordSuccess('');
-  };
-
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-
-    if (!signUpFullName.trim() || !signUpEmail.trim() || !signUpPhone.trim() || !signUpPassword || !signUpConfirmPassword) {
-      setErrorMsg('Please complete all registration fields.');
-      return;
-    }
-
-    if (signUpPassword.length < 8) {
-      setErrorMsg('Password must be at least 8 characters long.');
-      return;
-    }
-
-    if (signUpPassword !== signUpConfirmPassword) {
-      setErrorMsg('Password and confirmation do not match.');
-      return;
-    }
-
     try {
       const res = await fetch('/api/v1/auth/signup', {
         method: 'POST',
@@ -1061,9 +841,7 @@ export default function App() {
           fullName: signUpFullName, 
           email: signUpEmail, 
           phone: signUpPhone,
-          role: signUpRole,
-          password: signUpPassword,
-          confirmPassword: signUpConfirmPassword
+          role: signUpRole 
         })
       });
       if (res.ok) {
@@ -1074,8 +852,6 @@ export default function App() {
         setSignUpFullName('');
         setSignUpEmail('');
         setSignUpPhone('');
-        setSignUpPassword('');
-        setSignUpConfirmPassword('');
         setSignUpRole('TRAINEE');
         setIsSignUp(false);
       } else {
@@ -1767,7 +1543,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F7F8FA] font-sans flex flex-col antialiased">
+    <div className={`min-h-screen bg-[#F7F8FA] font-sans flex flex-col antialiased ${!currentUser ? 'h-screen max-h-screen overflow-hidden' : ''}`}>
       {/* Top Header */}
       {currentUser && (
         <header className="h-16 bg-white border-b border-[#E8E8E8] flex items-center justify-between px-4 sm:px-6 sticky top-0 z-40">
@@ -1789,7 +1565,7 @@ export default function App() {
               )}
             </button>
           )}
-          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-white rounded-md flex items-center justify-center shrink-0 overflow-hidden border border-[#7B1C2E]/20 p-1">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-white rounded-md flex items-center justify-center shrink-0 overflow-hidden border border-[#7B1C2E]/20 p-0.5">
             <KnpLogo />
           </div>
           <div>
@@ -1907,10 +1683,10 @@ export default function App() {
 
       {/* Main Core Router */}
       {!currentUser ? (
-        <div className="flex-1 flex items-center justify-center lg:justify-end min-h-screen w-full relative bg-[#120204] py-8 px-4 lg:pr-24 xl:pr-40 selection:bg-[#7B1C2E]/20 selection:text-white overflow-y-auto">
+        <div className="flex-1 flex items-center justify-center lg:justify-end h-screen max-h-screen w-full relative bg-[#120204] py-4 px-4 lg:pr-24 xl:pr-40 selection:bg-[#7B1C2E]/20 selection:text-white overflow-hidden">
           
           {/* Background Images with presentation-style transitions */}
-          <div className="fixed inset-0 w-full h-full z-0 overflow-hidden">
+          <div className="absolute inset-0 w-full h-full z-0 overflow-hidden">
             {backgroundImages.map((img, idx) => (
               <div
                 key={idx}
@@ -1929,16 +1705,16 @@ export default function App() {
           </div>
  
           {/* Dynamic Rich Maroon Tint Overlay & Gradient Wash */}
-          <div className="fixed inset-0 bg-gradient-to-t from-[#500A0A]/90 via-[#250105]/50 to-[#120204]/40 z-10 pointer-events-none"></div>
+          <div className="absolute inset-0 bg-gradient-to-t from-[#500A0A]/90 via-[#250105]/50 to-[#120204]/40 z-10 pointer-events-none"></div>
  
           {/* Ambient Soft Red/Maroon Spotlights that pulse slowly behind */}
-          <div className="fixed inset-0 overflow-hidden pointer-events-none z-10 select-none">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none z-10 select-none">
             <div className="absolute -top-[30%] -left-[10%] w-[60%] h-[60%] rounded-full bg-[#7B1C2E]/20 blur-[130px] mix-blend-screen animate-pulse" style={{ animationDuration: '9s' }}></div>
             <div className="absolute -bottom-[20%] -right-[10%] w-[50%] h-[50%] rounded-full bg-[#500A0A]/30 blur-[110px] mix-blend-screen animate-pulse" style={{ animationDuration: '12s' }}></div>
           </div>
  
           {/* Dynamic high-fidelity glassmorphism container in the left highlight box */}
-          <div className="fixed bottom-72 left-8 lg:left-12 xl:left-24 z-20 hidden lg:flex flex-col gap-2 backdrop-blur-xl bg-black/25 border border-white/10 rounded-2xl py-4 px-5 w-[25rem] xl:w-[30rem] transition-all duration-1000 shadow-[0_8px_32px_rgba(0,0,0,0.5)] select-none text-left">
+          <div className="absolute bottom-72 left-8 lg:left-12 xl:left-24 z-20 hidden lg:flex flex-col gap-2 backdrop-blur-xl bg-black/25 border border-white/10 rounded-2xl py-4 px-5 w-[25rem] xl:w-[30rem] transition-all duration-1000 shadow-[0_8px_32px_rgba(0,0,0,0.5)] select-none text-left">
             <div className="flex items-center gap-2">
               <span className="flex h-2 w-2 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -1952,10 +1728,10 @@ export default function App() {
               </h3>
             </div>
           </div>
-          <div className="w-full max-w-md bg-white border border-gray-200/80 rounded-2xl p-5 sm:p-6 shadow-2xl relative z-20 transition-all duration-500">
+          <div className="w-full max-w-md bg-white border border-gray-200/80 rounded-2xl p-6 sm:p-8 shadow-2xl relative z-20 transition-all duration-500">
             <div className="flex flex-col items-center text-center mb-5 select-none">
-              <div className="w-20 h-20 bg-white border border-[#7B1C2E]/20 rounded-full flex items-center justify-center p-2 shadow-md mb-3 overflow-hidden">
-                <KnpLogo />
+              <div className="w-12 h-12 bg-[#7B1C2E] rounded-full flex items-center justify-center p-2.5 shadow-md mb-3">
+                <Shield className="w-7 h-7 text-white fill-white/10" />
               </div>
               <h2 className="text-[13px] font-black uppercase tracking-wider text-[#7B1C2E] leading-tight text-center">
                 THE KITALE NATIONAL POLYTECHNIC
@@ -1993,11 +1769,11 @@ export default function App() {
 
                   {/* ROLE TOGGLE segmented control */}
                   <div>
-                    <div className="grid grid-cols-4 gap-1 bg-[#F3F4F6] p-0.5 rounded-full w-full">
+                    <div className="grid grid-cols-4 gap-1 bg-[#F3F4F6] p-1 rounded-full w-full">
                       <button
                         type="button"
                         onClick={() => handleRoleSelect('STUDENT')}
-                        className={`py-1.5 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
+                        className={`py-2 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
                           selectedRoleTab === 'STUDENT'
                             ? 'bg-white text-gray-950 shadow-sm'
                             : 'text-gray-500 hover:text-gray-700'
@@ -2008,7 +1784,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleRoleSelect('ASSESSOR')}
-                        className={`py-1.5 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
+                        className={`py-2 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
                           selectedRoleTab === 'ASSESSOR'
                             ? 'bg-white text-gray-950 shadow-sm'
                             : 'text-gray-500 hover:text-gray-700'
@@ -2019,7 +1795,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleRoleSelect('SUPERVISOR')}
-                        className={`py-1.5 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
+                        className={`py-2 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
                           selectedRoleTab === 'SUPERVISOR'
                             ? 'bg-white text-gray-950 shadow-sm'
                             : 'text-gray-500 hover:text-gray-700'
@@ -2030,7 +1806,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleRoleSelect('ADMIN')}
-                        className={`py-1.5 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
+                        className={`py-2 px-1 text-center text-[9px] md:text-[10px] font-black uppercase rounded-full transition-all duration-200 cursor-pointer ${
                           selectedRoleTab === 'ADMIN'
                             ? 'bg-white text-gray-950 shadow-sm'
                             : 'text-gray-500 hover:text-gray-700'
@@ -2043,14 +1819,14 @@ export default function App() {
 
                   {/* INSTITUTIONAL EMAIL field */}
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                       INSTITUTIONAL EMAIL
                     </label>
                     <input 
                       type="email" 
                       value={loginEmail} 
                       onChange={(e) => setLoginEmail(e.target.value)}
-                      className="w-full h-[45px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                      className="w-full h-[52px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
                       placeholder="name@polytechnic.ac.ke"
                       required
                     />
@@ -2058,16 +1834,13 @@ export default function App() {
 
                   {/* PASSPHRASE field */}
                   <div>
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between mb-1.5">
                       <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider">
                         PASSPHRASE
                       </label>
                       <button 
                         type="button"
-                        onClick={() => {
-                          setIsForgotPasswordOpen(true);
-                          setForgotPasswordError('');
-                        }}
+                        onClick={() => alert(`[DEMO PRESETS DETECTED] Present accounts on segments have password: 'password'.`)}
                         className="text-[11px] text-[#6B1020] font-bold uppercase tracking-wider hover:underline"
                       >
                         LOST KEY?
@@ -2078,7 +1851,7 @@ export default function App() {
                         type={showLoginPassword ? "text" : "password"} 
                         value={loginPassword} 
                         onChange={(e) => setLoginPassword(e.target.value)}
-                        className="w-full h-[45px] pl-4 pr-12 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                        className="w-full h-[52px] pl-4 pr-12 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
                         placeholder="••••••••"
                         required
                       />
@@ -2094,7 +1867,7 @@ export default function App() {
                   </div>
 
                   {/* REMEMBER ME CHECKBOX ROW */}
-                  <div className="flex items-start gap-2.5 py-0.5">
+                  <div className="flex items-start gap-2.5 py-1">
                     <input 
                       type="checkbox" 
                       id="remember-me"
@@ -2105,7 +1878,7 @@ export default function App() {
                       <label htmlFor="remember-me" className="block text-[11px] font-bold text-gray-800 uppercase tracking-wider leading-none select-none">
                         REMEMBER ME
                       </label>
-                      <span className="text-[9px] text-gray-400 font-bold block mt-1 uppercase tracking-wider leading-none">
+                      <span className="text-[10px] text-gray-400 font-bold block mt-1 uppercase tracking-wider leading-none">
                         PERSISTENT SESSION KEY
                       </span>
                     </div>
@@ -2114,7 +1887,7 @@ export default function App() {
                   {/* PRIMARY BUTTON */}
                   <button 
                     type="submit"
-                    className="w-full h-[45px] bg-[#6B1020] hover:bg-[#8C1D2F] text-white font-bold text-xs uppercase tracking-[0.15em] rounded-lg shadow-sm hover:shadow active:scale-[0.99] transition-all cursor-pointer"
+                    className="w-full h-[52px] bg-[#6B1020] hover:bg-[#8C1D2F] text-white font-bold text-xs uppercase tracking-[0.15em] rounded-lg shadow-sm hover:shadow active:scale-[0.99] transition-all cursor-pointer"
                   >
                     AUTHORIZE ACCESS
                   </button>
@@ -2138,34 +1911,34 @@ export default function App() {
                 <form 
                   onSubmit={handleSignUp} 
                   id="signup-form" 
-                  className="space-y-3"
+                  className="space-y-4"
                 >
                   <div>
-                    <h3 className="text-xl md:text-2xl font-bold text-[#1a1a1a] tracking-tight leading-tight">
+                    <h3 className="text-2xl md:text-3xl font-bold text-[#1a1a1a] tracking-tight leading-tight">
                       Request Access
                     </h3>
-                    <p className="text-gray-500 text-xs mt-1">
-                      Register your credentials to request an account.
+                    <p className="text-gray-500 text-xs md:text-sm mt-1">
+                      Register your institutional credentials to enroll.
                     </p>
                   </div>
 
                   {errorMsg && (
-                    <div className="p-2.5 bg-red-50 text-red-700 rounded-lg text-xs font-semibold border border-red-100 flex items-center gap-2">
-                      <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                    <div className="p-3 bg-red-50 text-red-700 rounded-lg text-xs font-semibold border border-red-100 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
                       <span>{errorMsg}</span>
                     </div>
                   )}
 
                   {/* Full Name field */}
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                       FULL NAME
                     </label>
                     <input 
                       type="text" 
                       value={signUpFullName} 
                       onChange={(e) => setSignUpFullName(e.target.value)}
-                      className="w-full h-[45px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                      className="w-full h-[52.5px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
                       placeholder="e.g. John Mwangi"
                       required
                     />
@@ -2173,14 +1946,14 @@ export default function App() {
 
                   {/* Institutional Email field */}
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                       INSTITUTIONAL EMAIL
                     </label>
                     <input 
                       type="email" 
                       value={signUpEmail} 
                       onChange={(e) => setSignUpEmail(e.target.value)}
-                      className="w-full h-[45px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                      className="w-full h-[52.5px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
                       placeholder="name@knpss.ac.ke"
                       required
                     />
@@ -2188,90 +1961,39 @@ export default function App() {
 
                   {/* Phone Number field */}
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                       PHONE NUMBER (SMS ALERTS)
                     </label>
                     <input 
                       type="text" 
                       value={signUpPhone} 
                       onChange={(e) => setSignUpPhone(e.target.value)}
-                      className="w-full h-[45px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
+                      className="w-full h-[52.5px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors" 
                       placeholder="e.g. +254712345678"
                       required
                     />
                   </div>
 
-                  {/* Password field */}
-                  <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                      PASSWORD
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showSignUpPassword ? 'text' : 'password'}
-                        value={signUpPassword}
-                        onChange={(e) => setSignUpPassword(e.target.value)}
-                        className="w-full h-[45px] px-4 pr-12 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
-                        placeholder="At least 8 characters"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSignUpPassword(!showSignUpPassword)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
-                        title={showSignUpPassword ? 'Hide password' : 'Show password'}
-                      >
-                        <Eye className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Confirm Password field */}
-                  <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                      CONFIRM PASSWORD
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showSignUpConfirmPassword ? 'text' : 'password'}
-                        value={signUpConfirmPassword}
-                        onChange={(e) => setSignUpConfirmPassword(e.target.value)}
-                        className="w-full h-[45px] px-4 pr-12 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
-                        placeholder="Re-type password"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSignUpConfirmPassword(!showSignUpConfirmPassword)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
-                        title={showSignUpConfirmPassword ? 'Hide password' : 'Show password'}
-                      >
-                        <Eye className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Role field */}
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                       SELECT SYSTEM ROLE
                     </label>
                     <select 
                       value={signUpRole} 
                       onChange={(e) => setSignUpRole(e.target.value as UserRole)}
-                      className="w-full h-[45px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
+                      className="w-full h-[52px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
                     >
                       <option value="TRAINEE">Enrolled Trainee / Student</option>
                       <option value="SUPERVISOR">Industry Host Supervisor</option>
                       <option value="OFFICER">Assessment Dispatch Officer</option>
-                      <option value="ADMIN">Institutional Admin</option>
                     </select>
                   </div>
 
                   {/* Create Account primary button */}
                   <button 
                     type="submit"
-                    className="w-full h-[45px] bg-[#6B1020] hover:bg-[#8C1D2F] text-white font-bold text-xs uppercase tracking-[0.1em] rounded-lg active:scale-[0.99] transition mt-1.5 cursor-pointer"
+                    className="w-full h-[52px] bg-[#6B1020] hover:bg-[#8C1D2F] text-white font-bold text-xs uppercase tracking-[0.1em] rounded-lg active:scale-[0.99] transition mt-2 cursor-pointer"
                   >
                     CREATE ACCOUNT & LOGIN
                   </button>
@@ -2289,164 +2011,6 @@ export default function App() {
                 </form>
               )}
             </div>
-
-            {/* Forgot Password Modal */}
-            {isForgotPasswordOpen && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
-                  {/* Close button */}
-                  <button
-                    onClick={closeForgotPassword}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-                  >
-                    <XSquare className="w-6 h-6" />
-                  </button>
-
-                  {/* Header */}
-                  <div className="mb-6">
-                    <h3 className="text-2xl font-bold text-[#1a1a1a]">
-                      {forgotPasswordStep === 'email' && 'Recover Password'}
-                      {forgotPasswordStep === 'otp' && 'Verify Code'}
-                      {forgotPasswordStep === 'reset' && 'Set New Password'}
-                    </h3>
-                    <p className="text-gray-500 text-sm mt-1">
-                      {forgotPasswordStep === 'email' && 'Enter your email to receive a verification code'}
-                      {forgotPasswordStep === 'otp' && 'Enter the 6-digit code sent to your email'}
-                      {forgotPasswordStep === 'reset' && 'Create a strong new password'}
-                    </p>
-                  </div>
-
-                  {/* Error Message */}
-                  {forgotPasswordError && (
-                    <div className="p-3 bg-red-50 text-red-700 rounded-lg text-xs font-semibold border border-red-100 flex items-center gap-2 mb-4">
-                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-                      {forgotPasswordError}
-                    </div>
-                  )}
-
-                  {/* Success Message */}
-                  {forgotPasswordSuccess && (
-                    <div className="p-3 bg-green-50 text-green-700 rounded-lg text-xs font-semibold border border-green-100 flex items-center gap-2 mb-4">
-                      <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
-                      {forgotPasswordSuccess}
-                    </div>
-                  )}
-
-                  {/* Step 1: Email */}
-                  {forgotPasswordStep === 'email' && (
-                    <form onSubmit={handleForgotPasswordSendOtp} className="space-y-4">
-                      <div>
-                        <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                          INSTITUTIONAL EMAIL
-                        </label>
-                        <input
-                          type="email"
-                          value={forgotPasswordEmail}
-                          onChange={(e) => setForgotPasswordEmail(e.target.value)}
-                          className="w-full h-[45px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
-                          placeholder="name@polytechnic.ac.ke"
-                          required
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={forgotPasswordLoading}
-                        className="w-full h-[45px] bg-[#6B1020] hover:bg-[#8C1D2F] disabled:bg-gray-400 text-white font-bold text-xs uppercase tracking-[0.15em] rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2"
-                      >
-                        {forgotPasswordLoading ? 'SENDING...' : 'SEND CODE'}
-                      </button>
-                    </form>
-                  )}
-
-                  {/* Step 2: OTP */}
-                  {forgotPasswordStep === 'otp' && (
-                    <form onSubmit={handleForgotPasswordVerifyOtp} className="space-y-4">
-                      <div>
-                        <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                          VERIFICATION CODE
-                        </label>
-                        <input
-                          type="text"
-                          value={forgotPasswordOtp}
-                          onChange={(e) => setForgotPasswordOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                          className="w-full h-[45px] px-4 border border-[#E5E7EB] rounded-lg text-sm font-bold text-center tracking-[0.2em] focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
-                          placeholder="000000"
-                          maxLength={6}
-                          required
-                        />
-                      </div>
-                      <p className="text-xs text-gray-500 text-center">Check your email for the code</p>
-                      <button
-                        type="submit"
-                        disabled={forgotPasswordLoading}
-                        className="w-full h-[45px] bg-[#6B1020] hover:bg-[#8C1D2F] disabled:bg-gray-400 text-white font-bold text-xs uppercase tracking-[0.15em] rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2"
-                      >
-                        {forgotPasswordLoading ? 'VERIFYING...' : 'VERIFY CODE'}
-                      </button>
-                    </form>
-                  )}
-
-                  {/* Step 3: Reset Password */}
-                  {forgotPasswordStep === 'reset' && (
-                    <form onSubmit={handleForgotPasswordReset} className="space-y-4">
-                      <div>
-                        <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                          NEW PASSWORD
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showForgotNewPassword ? 'text' : 'password'}
-                            value={forgotPasswordNewPassword}
-                            onChange={(e) => setForgotPasswordNewPassword(e.target.value)}
-                            className="w-full h-[45px] pl-4 pr-12 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
-                            placeholder="At least 8 characters"
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-                          >
-                            <Eye className="w-5 h-5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                          CONFIRM PASSWORD
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showForgotConfirmPassword ? 'text' : 'password'}
-                            value={forgotPasswordConfirmPassword}
-                            onChange={(e) => setForgotPasswordConfirmPassword(e.target.value)}
-                            className="w-full h-[45px] pl-4 pr-12 border border-[#E5E7EB] rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#7B1C2E]/20 focus:border-[#7B1C2E] bg-white text-gray-800 transition-colors"
-                            placeholder="Re-type password"
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowForgotConfirmPassword(!showForgotConfirmPassword)}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-                          >
-                            <Eye className="w-5 h-5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <button
-                        type="submit"
-                        disabled={forgotPasswordLoading}
-                        className="w-full h-[45px] bg-[#6B1020] hover:bg-[#8C1D2F] disabled:bg-gray-400 text-white font-bold text-xs uppercase tracking-[0.15em] rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2"
-                      >
-                        {forgotPasswordLoading ? 'RESETTING...' : 'RESET PASSWORD'}
-                      </button>
-                    </form>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       ) : (
@@ -4598,17 +4162,9 @@ export default function App() {
                   
                   {/* Left Column (7 cols): Trainees List */}
                   <div className="lg:col-span-7 bg-white shadow-sm border rounded-xl p-5 space-y-4">
-                    <div className="border-b pb-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <h3 className="font-bold text-gray-800 text-sm">Assigned Students Attachment Timeline</h3>
-                        <p className="text-gray-500 text-[11px] mt-0.5">Select a student row below to locate their registered workplace on the map.</p>
-                      </div>
-                      <button
-                        onClick={handleDownloadAssignedTimelinePDF}
-                        className="bg-[#7B1C2E] hover:bg-[#6A1727] text-white px-3 py-2 rounded-lg text-[11px] font-bold transition"
-                      >
-                        Download Timeline PDF
-                      </button>
+                    <div className="border-b pb-2">
+                      <h3 className="font-bold text-gray-800 text-sm">Assigned Students Attachment Timeline</h3>
+                      <p className="text-gray-500 text-[11px] mt-0.5">Select a student row below to locate their registered workplace on the map.</p>
                     </div>
                     
                     <div className="overflow-x-auto">

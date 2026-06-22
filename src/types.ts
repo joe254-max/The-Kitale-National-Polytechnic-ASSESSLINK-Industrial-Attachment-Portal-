@@ -14,7 +14,6 @@ export interface User {
   role: UserRole;
   fullName: string;
   email: string;
-  passwordHash?: string;
   phone?: string;
   profilePhotoUrl?: string;
   isActive: boolean;
